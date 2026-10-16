@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>PROTV Dashboard</title>
+</head>
+<body>
+    <div id="protvDashboardPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button">
+        <div data-role="content">
+            <div class="content-primary">
+                <style>
+                    #protvDashboardPage .protvNotice { border-left: 4px solid #e0a100; border-radius: 4px; margin: 0 0 .75em; padding: .75em 1em; }
+                    #protvDashboardPage .protvNotice.protvWarn { border-left-color: #e0a100; background: rgba(224, 161, 0, .15); }
+                    #protvDashboardPage .protvNotice.protvOk { border-left-color: #4caf50; background: rgba(76, 175, 80, .12); }
+                    #protvDashboardPage .protvNotice.protvBad { border-left-color: #f44336; background: rgba(244, 67, 54, .15); }
+                    #protvDashboardPage .protvTableWrap { max-height: 480px; overflow: auto; }
+                    #protvDashboardPage table.protvTable { border-collapse: collapse; width: 100%; }
+                    #protvDashboardPage table.protvTable th,
+                    #protvDashboardPage table.protvTable td { border-bottom: 1px solid rgba(127, 127, 127, .25); padding: .5em .6em; text-align: left; vertical-align: middle; }
+                    #protvDashboardPage table.protvTable th { position: sticky; top: 0; background: var(--card-background-color, #202020); z-index: 1; }
+                    #protvDashboardPage table.protvTable input[type="text"],
+                    #protvDashboardPage table.protvTable input[type="number"] { background: transparent; border: 1px solid rgba(127, 127, 127, .45); border-radius: 4px; box-sizing: border-box; color: inherit; font: inherit; padding: .35em .5em; width: 100%; }
+                    #protvDashboardPage .protvRow { align-items: center; display: flex; flex-wrap: wrap; gap: .75em; margin-bottom: .75em; }
+                    #protvDashboardPage .protvLogo { height: 24px; max-width: 48px; object-fit: contain; vertical-align: middle; }
+                    #protvDashboardPage .protvSmall { font-size: .9em; opacity: .8; }
+                </style>
+
+                <form id="protvDashboardForm">
+                    <div class="verticalSection">
+                        <div class="sectionTitleContainer flex align-items-center">
+                            <h2 class="sectionTitle" id="protvDashTitle">PROTV</h2>
+                        </div>
+                        <div class="fieldDescription" id="protvWelcome" style="margin-bottom: 1em;"></div>
+                        <div id="protvCompanionNotice" class="protvNotice" style="display: none;"></div>
+                    </div>
+
+                    <div class="verticalSection">
+                        <div class="sectionTitleContainer flex align-items-center">
+                            <h3 class="sectionTitle">Account</h3>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvUsername" type="text" autocomplete="username" label="Username" />
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvPassword" type="password" autocomplete="current-password" label="Password" />
+                            <div class="fieldDescription">Stored in this server's plugin settings.</div>
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
+                        <div class="sectionTitleContainer flex align-items-center">
+                            <h3 class="sectionTitle">Service</h3>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvApiBaseUrl" type="url" label="API base URL" placeholder="http://10.1.0.8:82" />
+                            <div class="fieldDescription">Address of the PROTV service, including the port.</div>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvAppId" type="text" label="App ID" placeholder="ca88f40a-3056-4c52-9614-8d75a3b0b178" />
+                            <div class="fieldDescription">Identifier the PROTV app signs in with. Change it only if the service requires a different one.</div>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvDeviceModel" type="text" label="Device model" placeholder="Jellyfin Server" />
+                            <div class="fieldDescription">Name this server reports to PROTV. Use a fixed name when running in Docker.</div>
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
+                        <div class="sectionTitleContainer flex align-items-center">
+                            <h3 class="sectionTitle">Channels</h3>
+                        </div>
+                        <div class="fieldDescription" style="margin-bottom: 1em;">
+                            Rename, hide, reorder or change the logo of any channel. Channel IDs never change. Lower priority numbers are listed first; channels with the same priority are sorted by name. After saving, run Refresh Guide so Live TV picks up the changes.
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvChannelFilter" type="text" label="Filter channels" />
+                        </div>
+                        <div id="protvChannelEmpty" class="protvNotice protvWarn" style="display: none;">
+                            No channels yet. Add the PROTV tuner under Live TV and run Refresh Guide; the channels appear here once the plugin has loaded them.
+                        </div>
+                        <div class="protvTableWrap" id="protvChannelWrap">
+                            <table class="protvTable">
+                                <thead>
+                                    <tr><th>ID</th><th>PROTV name</th><th>Custom name</th><th>Priority</th><th>Logo URL</th><th>Hidden</th></tr>
+                                </thead>
+                                <tbody id="protvChannelRows"></tbody>
+                            </table>
+                        </div>
+                        <div class="protvRow" style="margin-top: 1em;">
+                            <button is="emby-button" type="button" id="protvRefreshGuide" class="raised emby-button"><span>Refresh guide now</span></button>
+                            <span class="protvSmall" id="protvChannelCount"></span>
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
+                        <div class="sectionTitleContainer flex align-items-center">
+                            <h3 class="sectionTitle">Appearance</h3>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvTitleInput" type="text" label="Page heading" />
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvWelcomeInput" type="text" label="Message under the heading" />
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvSidebarLabel" type="text" label="Menu label" />
+                            <div class="fieldDescription">Name of the PROTV entry in the dashboard menu and the Plugin Pages sidebar. Reload the page (and restart Jellyfin for the sidebar) to see it.</div>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvSidebarIcon" type="text" label="Menu icon" placeholder="live_tv" />
+                            <div class="fieldDescription">A Material icon name, for example live_tv, tv or satellite_alt.</div>
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
+                        <div class="sectionTitleContainer flex align-items-center">
+                            <h3 class="sectionTitle">Device and streaming</h3>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvDeviceIp" type="text" label="Device IP address" placeholder="192.168.100.20" />
+                            <div class="fieldDescription">Address this server reports to PROTV. Leave empty to detect it automatically.</div>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvDeviceMac" type="text" label="Device MAC address" />
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvRouterMac" type="text" label="Router MAC address" />
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvMulticastInterface" type="text" label="Multicast network interface (IP address)" placeholder="192.168.100.20" />
+                            <div class="fieldDescription">IP of the network card that receives the PROTV multicast streams. Only needed when the server has several network cards.</div>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvAnalyzeMs" type="number" min="0" step="100" label="Stream analysis time (ms)" />
+                            <div class="fieldDescription">Lower starts playback faster; too low can miss audio tracks. 0 uses Jellyfin's default.</div>
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
+                        <div class="sectionTitleContainer flex align-items-center">
+                            <h3 class="sectionTitle">Jellyfin home page tab</h3>
+                        </div>
+                        <div class="fieldDescription" style="margin-bottom: 1em;">
+                            Adds a PROTV tab next to Favorites on the Jellyfin home page, listing every channel this tuner serves with the same numbering and names Live TV uses. The tab is drawn by the Custom Tabs plugin, so Plugin Pages, File Transformation and Custom Tabs all have to be installed and running.
+                        </div>
+                        <div class="inputContainer">
+                            <label style="align-items: center; display: flex; gap: .5em;">
+                                <input type="checkbox" id="protvFrontpageTabEnabled" />
+                                <span>Show the PROTV tab on the Jellyfin home page</span>
+                            </label>
+                            <div class="fieldDescription">Restart Jellyfin after changing this.</div>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvFrontpageTabTitle" type="text" label="Home page tab label" placeholder="PROTV" />
+                            <div class="fieldDescription">Text on the tab. Restart Jellyfin after changing it.</div>
+                        </div>
+                        <div class="inputContainer">
+                            <label style="align-items: center; display: flex; gap: .5em;">
+                                <input type="checkbox" id="protvRequireCompanions" />
+                                <span>Require Plugin Pages, File Transformation and Custom Tabs</span>
+                            </label>
+                            <div class="fieldDescription">
+                                When on, PROTV does not start its tuner, guide or pages unless all three plugins are installed. Turn it off to keep Live TV running without the home page tab.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                            <span>Save</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    <script type="text/javascript">
+        (function () {
+            var pluginId = '4a0a66d7-04ae-4c4d-b9af-8cb6a1c44f86';
+            var page = document.querySelector('#protvDashboardPage');
+            var form = document.querySelector('#protvDashboardForm');
+            var state = { config: null, channels: [], overrides: {} };
+            var loading = false;
+
+            function el(id) { return document.querySelector('#' + id); }
+
+            function esc(value) {
+                return String(value == null ? '' : value)
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            }
+
+            // ---- rendering ----
+
+            function renderChannels() {
+                var rows = state.channels.map(function (channel) {
+                    var o = state.overrides[channel.Id] || {};
+                    var logo = channel.LogoUrl ? '<img class="protvLogo" src="' + esc(channel.LogoUrl) + '" alt="" onerror="this.style.display=\'none\'" /> ' : '';
+                    return '<tr data-id="' + channel.Id + '" data-name="' + esc(String(channel.Name).toLowerCase()) + '">' +
+                        '<td>' + channel.Id + '</td>' +
+                        '<td>' + logo + esc(channel.Name) + '</td>' +
+                        '<td><input type="text" data-field="CustomName" placeholder="' + esc(channel.Name) + '" value="' + esc(o.CustomName) + '" /></td>' +
+                        '<td style="width: 6em;"><input type="number" step="1" data-field="Priority" value="' + (o.Priority || 0) + '" /></td>' +
+                        '<td><input type="text" data-field="LogoUrl" placeholder="(PROTV logo)" value="' + esc(o.LogoUrl) + '" /></td>' +
+                        '<td><input type="checkbox" data-field="Hidden"' + (o.Hidden ? ' checked' : '') + ' /></td>' +
+                        '</tr>';
+                });
+                el('protvChannelRows').innerHTML = rows.join('');
+                el('protvChannelEmpty').style.display = state.channels.length ? 'none' : 'block';
+                el('protvChannelWrap').style.display = state.channels.length ? 'block' : 'none';
+                updateChannelCount();
+            }
+
+            function updateChannelCount() {
+                var total = state.channels.length;
+                var hidden = document.querySelectorAll('#protvChannelRows input[data-field="Hidden"]:checked').length;
+                el('protvChannelCount').textContent = total ? (total + ' channels, ' + hidden + ' hidden') : '';
+            }
+
+            function applyFilter() {
+                var needle = el('protvChannelFilter').value.trim().toLowerCase();
+                Array.prototype.forEach.call(document.querySelectorAll('#protvChannelRows tr'), function (row) {
+                    var text = row.getAttribute('data-id') + ' ' + row.getAttribute('data-name') + ' ' + (row.querySelector('[data-field="CustomName"]').value || '').toLowerCase();
+                    row.style.display = !needle || text.indexOf(needle) !== -1 ? '' : 'none';
+                });
+            }
+
+            // ---- reading the form ----
+
+            function readOverrides() {
+                var result = [];
+                var seen = {};
+                Array.prototype.forEach.call(document.querySelectorAll('#protvChannelRows tr[data-id]'), function (row) {
+                    var id = parseInt(row.getAttribute('data-id'), 10);
+                    seen[id] = true;
+                    var item = {
+                        ChannelId: id,
+                        CustomName: row.querySelector('[data-field="CustomName"]').value.trim(),
+                        Priority: parseInt(row.querySelector('[data-field="Priority"]').value, 10) || 0,
+                        LogoUrl: row.querySelector('[data-field="LogoUrl"]').value.trim(),
+                        Hidden: row.querySelector('[data-field="Hidden"]').checked
+                    };
+                    if (item.CustomName || item.Priority !== 0 || item.LogoUrl || item.Hidden) { result.push(item); }
+                });
+                // Keep overrides for channels PROTV no longer lists, so they come back with the channel.
+                Object.keys(state.overrides).forEach(function (key) {
+                    if (!seen[key]) { result.push(state.overrides[key]); }
+                });
+                return result;
+            }
+
+            function readFields() {
+                return {
+                    Username: el('protvUsername').value.trim(),
+                    Password: el('protvPassword').value,
+                    ApiBaseUrl: el('protvApiBaseUrl').value.trim(),
+                    AppId: el('protvAppId').value.trim(),
+                    DeviceModel: el('protvDeviceModel').value.trim(),
+                    DashboardTitle: el('protvTitleInput').value.trim(),
+                    WelcomeMessage: el('protvWelcomeInput').value.trim(),
+                    SidebarLabel: el('protvSidebarLabel').value.trim(),
+                    SidebarIcon: el('protvSidebarIcon').value.trim(),
+                    DeviceIpAddress: el('protvDeviceIp').value.trim(),
+                    DeviceMacAddress: el('protvDeviceMac').value.trim(),
+                    RouterMacAddress: el('protvRouterMac').value.trim(),
+                    MulticastInterfaceAddress: el('protvMulticastInterface').value.trim(),
+                    StreamAnalyzeDurationMs: Math.max(0, parseInt(el('protvAnalyzeMs').value, 10) || 0),
+                    FrontpageTabEnabled: el('protvFrontpageTabEnabled').checked,
+                    FrontpageTabTitle: el('protvFrontpageTabTitle').value.trim(),
+                    RequireCompanionPlugins: el('protvRequireCompanions').checked
+                };
+            }
+
+            function fillFields(config) {
+                el('protvUsername').value = config.Username || '';
+                el('protvPassword').value = config.Password || '';
+                el('protvApiBaseUrl').value = config.ApiBaseUrl || '';
+                el('protvAppId').value = config.AppId || '';
+                el('protvDeviceModel').value = config.DeviceModel || '';
+                el('protvTitleInput').value = config.DashboardTitle || '';
+                el('protvWelcomeInput').value = config.WelcomeMessage || '';
+                el('protvSidebarLabel').value = config.SidebarLabel || '';
+                el('protvSidebarIcon').value = config.SidebarIcon || '';
+                el('protvDeviceIp').value = config.DeviceIpAddress || '';
+                el('protvDeviceMac').value = config.DeviceMacAddress || '';
+                el('protvRouterMac').value = config.RouterMacAddress || '';
+                el('protvMulticastInterface').value = config.MulticastInterfaceAddress || '';
+                el('protvAnalyzeMs').value = config.StreamAnalyzeDurationMs == null ? 1500 : config.StreamAnalyzeDurationMs;
+                el('protvFrontpageTabEnabled').checked = config.FrontpageTabEnabled !== false;
+                el('protvFrontpageTabTitle').value = config.FrontpageTabTitle || '';
+                el('protvRequireCompanions').checked = config.RequireCompanionPlugins !== false;
+                el('protvDashTitle').textContent = config.DashboardTitle || 'PROTV';
+                el('protvWelcome').textContent = config.WelcomeMessage || '';
+                el('protvWelcome').style.display = config.WelcomeMessage ? 'block' : 'none';
+            }
+
+            // ---- loading / errors ----
+
+            function describeError(error) {
+                if (error && typeof error.status === 'number') {
+                    var summary = 'HTTP ' + error.status + (error.statusText ? ' ' + error.statusText : '');
+                    if (typeof error.text === 'function') {
+                        return error.text().then(function (body) {
+                            return body ? summary + ': ' + body.substring(0, 300) : summary;
+                        }, function () { return summary; });
+                    }
+                    return Promise.resolve(summary);
+                }
+                return Promise.resolve((error && error.message) || String(error || 'Unknown error'));
+            }
+
+            // ---- companion plugins ----
+
+            // The sidebar entry and the Jellyfin home page tab are drawn by Plugin Pages,
+            // File Transformation and Custom Tabs, so their state is shown at the top of the page.
+            function renderCompanionNotice(status) {
+                var notice = el('protvCompanionNotice');
+                if (!notice || !status) { return; }
+                var requirements = status.requirements || [];
+                var describe = requirements.map(function (item) {
+                    var state = item.installed ? (item.loaded ? 'installed and running' : 'installed but not loaded') : 'not installed';
+                    return item.name + ' (' + state + ')';
+                });
+                var problems = requirements.filter(function (item) { return !(item.installed && item.loaded); });
+                var html = '<strong>Home page tab dependencies:</strong> ' + esc(describe.join(', ')) + '. ';
+                if (problems.length) {
+                    html += 'The PROTV sidebar entry and home page tab need all three installed and running. ' +
+                        'Install the build that matches this Jellyfin version and restart Jellyfin.';
+                    if (status.requireCompanionPlugins) {
+                        html += ' Require Companion Plugins is on, so PROTV keeps its tuner, guide and pages off until they are.';
+                    }
+                } else if (status.frontpageTabEnabled) {
+                    html += status.tabRegistered
+                        ? 'The PROTV tab is registered on the Jellyfin home page.'
+                        : 'The tab is enabled but not registered yet; restart Jellyfin.';
+                } else {
+                    html += 'The PROTV home page tab is switched off below.';
+                }
+
+                if (status.channelCount) {
+                    html += ' ' + status.channelCount + ' channels are stored for the tab.';
+                }
+
+                notice.className = 'protvNotice ' + (problems.length ? 'protvBad' : 'protvOk');
+                notice.innerHTML = html;
+                notice.style.display = 'block';
+            }
+
+            function loadCompanionNotice() {
+                return ApiClient.getJSON(ApiClient.getUrl('PROTV/Status')).then(renderCompanionNotice, function () {
+                    // Older plugin builds have no status endpoint; the page still works without it.
+                });
+            }
+
+            function load() {
+                if (loading) { return; }
+                loading = true;
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    state.config = config;
+                    state.channels = (config.KnownChannels || []).slice().sort(function (a, b) { return a.Id - b.Id; });
+                    state.overrides = {};
+                    (config.ChannelOverrides || []).forEach(function (o) { state.overrides[o.ChannelId] = o; });
+                    fillFields(config);
+                    renderChannels();
+                    loadCompanionNotice();
+                }).catch(function (error) {
+                    return describeError(error).then(function (message) {
+                        Dashboard.alert({ title: 'PROTV', text: 'Could not load the PROTV settings. ' + message });
+                    });
+                }).then(function () {
+                    loading = false;
+                    Dashboard.hideLoadingMsg();
+                });
+            }
+
+            function showSaved(result) {
+                try {
+                    if (Dashboard.processPluginConfigurationUpdateResult) {
+                        Dashboard.processPluginConfigurationUpdateResult(result);
+                        return;
+                    }
+                } catch (ignored) { }
+                Dashboard.alert({ title: 'PROTV', text: 'Settings saved.' });
+            }
+
+            // ---- events ----
+
+            el('protvChannelFilter').addEventListener('input', applyFilter);
+            el('protvChannelRows').addEventListener('change', updateChannelCount);
+
+            el('protvRefreshGuide').addEventListener('click', function () {
+                Dashboard.showLoadingMsg();
+                ApiClient.getJSON(ApiClient.getUrl('ScheduledTasks')).then(function (tasks) {
+                    var task = (tasks || []).filter(function (t) { return t.Key === 'RefreshGuide'; })[0];
+                    if (!task) { throw new Error('The Refresh Guide task was not found.'); }
+                    return ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('ScheduledTasks/Running/' + task.Id) });
+                }).then(function () {
+                    Dashboard.hideLoadingMsg();
+                    Dashboard.alert({ title: 'PROTV', text: 'Guide refresh started. It runs in the background.' });
+                }).catch(function (error) {
+                    Dashboard.hideLoadingMsg();
+                    describeError(error).then(function (message) {
+                        Dashboard.alert({ title: 'PROTV', text: 'Could not start the guide refresh. ' + message });
+                    });
+                });
+            });
+
+            page.addEventListener('pageshow', load);
+            page.addEventListener('viewshow', load);
+            load();
+
+            form.addEventListener('submit', function (event) {
+                event.preventDefault();
+                var overrides = readOverrides();
+                var values = readFields();
+                var updateResult;
+                Dashboard.showLoadingMsg();
+
+                // Read the current settings first so the channel snapshot and other fields are kept.
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    Object.keys(values).forEach(function (key) { config[key] = values[key]; });
+                    config.ChannelOverrides = overrides;
+                    return ApiClient.updatePluginConfiguration(pluginId, config);
+                }).then(function (result) {
+                    updateResult = result;
+                    return ApiClient.getPluginConfiguration(pluginId);
+                }).then(function (stored) {
+                    var mismatch = Object.keys(values).filter(function (key) { return (stored[key] == null ? '' : stored[key]) !== values[key]; });
+                    if ((stored.ChannelOverrides || []).length !== overrides.length) { mismatch.push('ChannelOverrides'); }
+                    if (mismatch.length) {
+                        throw new Error('The server accepted the request but did not keep: ' + mismatch.join(', ') + '. Check that the Jellyfin config folder is writable.');
+                    }
+                    Dashboard.hideLoadingMsg();
+                    showSaved(updateResult);
+                    state.config = stored;
+                    state.overrides = {};
+                    (stored.ChannelOverrides || []).forEach(function (o) { state.overrides[o.ChannelId] = o; });
+                    fillFields(stored);
+                    loadCompanionNotice();
+                }).catch(function (error) {
+                    Dashboard.hideLoadingMsg();
+                    describeError(error).then(function (message) {
+                        Dashboard.alert({ title: 'PROTV', text: 'Unable to save PROTV settings. ' + message });
+                    });
+                });
+            });
+        })();
+    </script>
+    </div>
+</body>
+</html>
