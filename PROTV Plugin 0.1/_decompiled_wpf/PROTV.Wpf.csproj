@@ -1,0 +1,258 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  <PropertyGroup>
+    <AssemblyName>PROTV.Wpf</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>True</UseWPF>
+    <TargetFramework>net5.0</TargetFramework>
+    <PlatformTarget>x86</PlatformTarget>
+  </PropertyGroup>
+  <PropertyGroup>
+    <LangVersion>14.0</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+  </PropertyGroup>
+  <PropertyGroup>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <RootNamespace />
+  </PropertyGroup>
+  <ItemGroup>
+    <None Remove="RYpQrEhFPlnpQIBFJL.tugWxwtPOYe5jEaA6c" />
+    <None Remove="views\loginview.baml" />
+    <None Remove="views\settings\liveviewsettings.baml" />
+    <None Remove="resources\fonts\font-20awesome-205-20pro-light-300.otf" />
+    <None Remove="views\controllerpanelcontrol.baml" />
+    <None Remove="resources\images\baricons\setting.png" />
+    <None Remove="resources\images\rent.png" />
+    <None Remove="resources\fonts\fontawesome.ttf" />
+    <None Remove="resources\images\default\favorite.png" />
+    <None Remove="resources\styles\colors.baml" />
+    <None Remove="resources\images\baricons\series.png" />
+    <None Remove="views\logoview.baml" />
+    <None Remove="resources\styles\yttemplates.baml" />
+    <None Remove="resources\styles\icons.baml" />
+    <None Remove="resources\styles\texts.baml" />
+    <None Remove="views\ytviews\ytview.baml" />
+    <None Remove="resources\images\iptv.png" />
+    <None Remove="resources\images\default\movie_default.jpg" />
+    <None Remove="resources\fonts\tajawal-light.ttf" />
+    <None Remove="resources\images\baricons\tv.png" />
+    <None Remove="resources\images\trailer_movie.png" />
+    <None Remove="views\ytviews\ytwatchlaterview.baml" />
+    <None Remove="views\radioplayer\radiocontrolview.baml" />
+    <None Remove="views\mviews\albumsview.baml" />
+    <None Remove="resources\images\default\default_artist.png" />
+    <None Remove="views\moviedetailsview.baml" />
+    <None Remove="views\homeview.baml" />
+    <None Remove="resources\styles\musictemplates.baml" />
+    <None Remove="resources\images\baricons\music.png" />
+    <None Remove="views\mviews\songsview.baml" />
+    <None Remove="views\ytviews\ytsubcribechannelsview.baml" />
+    <None Remove="test\ffmeplayercontrol.baml" />
+    <None Remove="resources\styles\template.baml" />
+    <None Remove="views\ytviews\yttrendingview.baml" />
+    <None Remove="views\seriesplayer\seriesffmeplayer.baml" />
+    <None Remove="resources\images\watch_movie.png" />
+    <None Remove="resources\fonts\tajawal-regular.ttf" />
+    <None Remove="views\surahsview.baml" />
+    <None Remove="resources\images\baricons\radio.png" />
+    <None Remove="views\youtubeplayer\ytitemlistcontrol.baml" />
+    <None Remove="resources\images\default\series_default.png" />
+    <None Remove="views\radioplayer\radioffmeplayer.baml" />
+    <None Remove="resources\fonts\tajawal-bold.ttf" />
+    <None Remove="resources\styles\buttons.baml" />
+    <None Remove="views\ytviews\ytchannelsview.baml" />
+    <None Remove="views\youtubeplayer\ytffmeplayer.baml" />
+    <None Remove="resources\styles\combobox.baml" />
+    <None Remove="resources\styles\fonts.baml" />
+    <None Remove="views\seriesdetailsview.baml" />
+    <None Remove="test\mywatchlistpage.baml" />
+    <None Remove="views\seriesplayer\seasonlistpanelcontrol.baml" />
+    <None Remove="resources\styles\yticons.baml" />
+    <None Remove="resources\images\default\default_playlist.png" />
+    <None Remove="views\mviews\artistdetailsview.baml" />
+    <None Remove="views\liveplayer\liveffmeplayer.baml" />
+    <None Remove="views\ytviews\ytsubscripevideoview.baml" />
+    <None Remove="views\pagehost.baml" />
+    <None Remove="views\youtubeplayer\ytlistpanelcontrol.baml" />
+    <None Remove="views\liveplayer\channellistpanelcontrol.baml" />
+    <None Remove="players\videoplayerview.baml" />
+    <None Remove="resources\images\yt\ytplay.png" />
+    <None Remove="views\profileview.baml" />
+    <None Remove="resources\fonts\font-20awesome-205-20free-regular-400.otf" />
+    <None Remove="views\movieplayer\movieffmeplayer.baml" />
+    <None Remove="resources\fonts\fontawesome5solid.otf" />
+    <None Remove="resources\images\baricons\entertainment.png" />
+    <None Remove="mainwindow.baml" />
+    <None Remove="resources\styles\prowindow.baml" />
+    <None Remove="resources\images\baricons\youtube.png" />
+    <None Remove="views\liveplayer\channelitemlistcontrol.baml" />
+    <None Remove="views\musicview.baml" />
+    <None Remove="resources\images\play.png" />
+    <None Remove="resources\images\baricons\movies.png" />
+    <None Remove="views\propertiespanelcontrol.baml" />
+    <None Remove="views\seriesplayer\episodeitemlistcontrol.baml" />
+    <None Remove="views\ytviews\ythomeview.baml" />
+    <None Remove="resources\images\baricons\account.png" />
+    <None Remove="resources\images\baricons\tv_show_png_icon.png" />
+    <None Remove="views\mviews\songinfoview.baml" />
+    <None Remove="views\ytviews\ytchannelview.baml" />
+    <None Remove="views\musicplaylistsview.baml" />
+    <None Remove="resources\images\baricons\logout.png" />
+    <None Remove="views\ytviews\ythistoryvideoview.baml" />
+    <None Remove="resources\images\yt\no_thumbnail.png" />
+    <None Remove="test\miniffmeplayercontrol.baml" />
+    <None Remove="resources\images\default\default_song.png" />
+    <None Remove="views\mviews\playlistsonglistview.baml" />
+    <None Remove="resources\styles\livelisttemplate.baml" />
+    <None Remove="resources\images\default\default_album.png" />
+    <None Remove="resources\images\baricons\quran.png" />
+    <None Remove="views\quranview.baml" />
+    <None Remove="views\moviesview.baml" />
+    <None Remove="resources\images\bg.jpg" />
+    <None Remove="views\entertainmentcenterview.baml" />
+    <None Remove="views\ytviews\ytlikedview.baml" />
+    <None Remove="app.baml" />
+    <None Remove="views\seriesview.baml" />
+    <None Remove="views\mviews\artistsview.baml" />
+    <None Remove="resources\images\splash.png" />
+    <None Remove="resources\images\rent_movie.png" />
+    <None Remove="vfRB9mRnhub5PNrSjB.fq2DahF657vgaUrbK9" />
+    <EmbeddedResource Include="RYpQrEhFPlnpQIBFJL.tugWxwtPOYe5jEaA6c" LogicalName="RYpQrEhFPlnpQIBFJL.tugWxwtPOYe5jEaA6c" />
+    <EmbeddedResource Include="views\loginview.baml" LogicalName="views/loginview.baml" />
+    <EmbeddedResource Include="views\settings\liveviewsettings.baml" LogicalName="views/settings/liveviewsettings.baml" />
+    <EmbeddedResource Include="resources\fonts\font-20awesome-205-20pro-light-300.otf" LogicalName="resources/fonts/font%20awesome%205%20pro-light-300.otf" />
+    <EmbeddedResource Include="views\controllerpanelcontrol.baml" LogicalName="views/controllerpanelcontrol.baml" />
+    <EmbeddedResource Include="resources\images\baricons\setting.png" LogicalName="resources/images/baricons/setting.png" />
+    <EmbeddedResource Include="resources\images\rent.png" LogicalName="resources/images/rent.png" />
+    <EmbeddedResource Include="resources\fonts\fontawesome.ttf" LogicalName="resources/fonts/fontawesome.ttf" />
+    <EmbeddedResource Include="resources\images\default\favorite.png" LogicalName="resources/images/default/favorite.png" />
+    <EmbeddedResource Include="resources\styles\colors.baml" LogicalName="resources/styles/colors.baml" />
+    <EmbeddedResource Include="resources\images\baricons\series.png" LogicalName="resources/images/baricons/series.png" />
+    <EmbeddedResource Include="views\logoview.baml" LogicalName="views/logoview.baml" />
+    <EmbeddedResource Include="resources\styles\yttemplates.baml" LogicalName="resources/styles/yttemplates.baml" />
+    <EmbeddedResource Include="resources\styles\icons.baml" LogicalName="resources/styles/icons.baml" />
+    <EmbeddedResource Include="resources\styles\texts.baml" LogicalName="resources/styles/texts.baml" />
+    <EmbeddedResource Include="views\ytviews\ytview.baml" LogicalName="views/ytviews/ytview.baml" />
+    <EmbeddedResource Include="resources\images\iptv.png" LogicalName="resources/images/iptv.png" />
+    <EmbeddedResource Include="resources\images\default\movie_default.jpg" LogicalName="resources/images/default/movie_default.jpg" />
+    <EmbeddedResource Include="resources\fonts\tajawal-light.ttf" LogicalName="resources/fonts/tajawal-light.ttf" />
+    <EmbeddedResource Include="resources\images\baricons\tv.png" LogicalName="resources/images/baricons/tv.png" />
+    <EmbeddedResource Include="resources\images\trailer_movie.png" LogicalName="resources/images/trailer_movie.png" />
+    <EmbeddedResource Include="views\ytviews\ytwatchlaterview.baml" LogicalName="views/ytviews/ytwatchlaterview.baml" />
+    <EmbeddedResource Include="views\radioplayer\radiocontrolview.baml" LogicalName="views/radioplayer/radiocontrolview.baml" />
+    <EmbeddedResource Include="views\mviews\albumsview.baml" LogicalName="views/mviews/albumsview.baml" />
+    <EmbeddedResource Include="resources\images\default\default_artist.png" LogicalName="resources/images/default/default_artist.png" />
+    <EmbeddedResource Include="views\moviedetailsview.baml" LogicalName="views/moviedetailsview.baml" />
+    <EmbeddedResource Include="views\homeview.baml" LogicalName="views/homeview.baml" />
+    <EmbeddedResource Include="resources\styles\musictemplates.baml" LogicalName="resources/styles/musictemplates.baml" />
+    <EmbeddedResource Include="resources\images\baricons\music.png" LogicalName="resources/images/baricons/music.png" />
+    <EmbeddedResource Include="views\mviews\songsview.baml" LogicalName="views/mviews/songsview.baml" />
+    <EmbeddedResource Include="views\ytviews\ytsubcribechannelsview.baml" LogicalName="views/ytviews/ytsubcribechannelsview.baml" />
+    <EmbeddedResource Include="test\ffmeplayercontrol.baml" LogicalName="test/ffmeplayercontrol.baml" />
+    <EmbeddedResource Include="resources\styles\template.baml" LogicalName="resources/styles/template.baml" />
+    <EmbeddedResource Include="views\ytviews\yttrendingview.baml" LogicalName="views/ytviews/yttrendingview.baml" />
+    <EmbeddedResource Include="views\seriesplayer\seriesffmeplayer.baml" LogicalName="views/seriesplayer/seriesffmeplayer.baml" />
+    <EmbeddedResource Include="resources\images\watch_movie.png" LogicalName="resources/images/watch_movie.png" />
+    <EmbeddedResource Include="resources\fonts\tajawal-regular.ttf" LogicalName="resources/fonts/tajawal-regular.ttf" />
+    <EmbeddedResource Include="views\surahsview.baml" LogicalName="views/surahsview.baml" />
+    <EmbeddedResource Include="resources\images\baricons\radio.png" LogicalName="resources/images/baricons/radio.png" />
+    <EmbeddedResource Include="views\youtubeplayer\ytitemlistcontrol.baml" LogicalName="views/youtubeplayer/ytitemlistcontrol.baml" />
+    <EmbeddedResource Include="resources\images\default\series_default.png" LogicalName="resources/images/default/series_default.png" />
+    <EmbeddedResource Include="views\radioplayer\radioffmeplayer.baml" LogicalName="views/radioplayer/radioffmeplayer.baml" />
+    <EmbeddedResource Include="resources\fonts\tajawal-bold.ttf" LogicalName="resources/fonts/tajawal-bold.ttf" />
+    <EmbeddedResource Include="resources\styles\buttons.baml" LogicalName="resources/styles/buttons.baml" />
+    <EmbeddedResource Include="views\ytviews\ytchannelsview.baml" LogicalName="views/ytviews/ytchannelsview.baml" />
+    <EmbeddedResource Include="views\youtubeplayer\ytffmeplayer.baml" LogicalName="views/youtubeplayer/ytffmeplayer.baml" />
+    <EmbeddedResource Include="resources\styles\combobox.baml" LogicalName="resources/styles/combobox.baml" />
+    <EmbeddedResource Include="resources\styles\fonts.baml" LogicalName="resources/styles/fonts.baml" />
+    <EmbeddedResource Include="views\seriesdetailsview.baml" LogicalName="views/seriesdetailsview.baml" />
+    <EmbeddedResource Include="test\mywatchlistpage.baml" LogicalName="test/mywatchlistpage.baml" />
+    <EmbeddedResource Include="views\seriesplayer\seasonlistpanelcontrol.baml" LogicalName="views/seriesplayer/seasonlistpanelcontrol.baml" />
+    <EmbeddedResource Include="resources\styles\yticons.baml" LogicalName="resources/styles/yticons.baml" />
+    <EmbeddedResource Include="resources\images\default\default_playlist.png" LogicalName="resources/images/default/default_playlist.png" />
+    <EmbeddedResource Include="views\mviews\artistdetailsview.baml" LogicalName="views/mviews/artistdetailsview.baml" />
+    <EmbeddedResource Include="views\liveplayer\liveffmeplayer.baml" LogicalName="views/liveplayer/liveffmeplayer.baml" />
+    <EmbeddedResource Include="views\ytviews\ytsubscripevideoview.baml" LogicalName="views/ytviews/ytsubscripevideoview.baml" />
+    <EmbeddedResource Include="views\pagehost.baml" LogicalName="views/pagehost.baml" />
+    <EmbeddedResource Include="views\youtubeplayer\ytlistpanelcontrol.baml" LogicalName="views/youtubeplayer/ytlistpanelcontrol.baml" />
+    <EmbeddedResource Include="views\liveplayer\channellistpanelcontrol.baml" LogicalName="views/liveplayer/channellistpanelcontrol.baml" />
+    <EmbeddedResource Include="players\videoplayerview.baml" LogicalName="players/videoplayerview.baml" />
+    <EmbeddedResource Include="resources\images\yt\ytplay.png" LogicalName="resources/images/yt/ytplay.png" />
+    <EmbeddedResource Include="views\profileview.baml" LogicalName="views/profileview.baml" />
+    <EmbeddedResource Include="resources\fonts\font-20awesome-205-20free-regular-400.otf" LogicalName="resources/fonts/font%20awesome%205%20free-regular-400.otf" />
+    <EmbeddedResource Include="views\movieplayer\movieffmeplayer.baml" LogicalName="views/movieplayer/movieffmeplayer.baml" />
+    <EmbeddedResource Include="resources\fonts\fontawesome5solid.otf" LogicalName="resources/fonts/fontawesome5solid.otf" />
+    <EmbeddedResource Include="resources\images\baricons\entertainment.png" LogicalName="resources/images/baricons/entertainment.png" />
+    <EmbeddedResource Include="mainwindow.baml" LogicalName="mainwindow.baml" />
+    <EmbeddedResource Include="resources\styles\prowindow.baml" LogicalName="resources/styles/prowindow.baml" />
+    <EmbeddedResource Include="resources\images\baricons\youtube.png" LogicalName="resources/images/baricons/youtube.png" />
+    <EmbeddedResource Include="views\liveplayer\channelitemlistcontrol.baml" LogicalName="views/liveplayer/channelitemlistcontrol.baml" />
+    <EmbeddedResource Include="views\musicview.baml" LogicalName="views/musicview.baml" />
+    <EmbeddedResource Include="resources\images\play.png" LogicalName="resources/images/play.png" />
+    <EmbeddedResource Include="resources\images\baricons\movies.png" LogicalName="resources/images/baricons/movies.png" />
+    <EmbeddedResource Include="views\propertiespanelcontrol.baml" LogicalName="views/propertiespanelcontrol.baml" />
+    <EmbeddedResource Include="views\seriesplayer\episodeitemlistcontrol.baml" LogicalName="views/seriesplayer/episodeitemlistcontrol.baml" />
+    <EmbeddedResource Include="views\ytviews\ythomeview.baml" LogicalName="views/ytviews/ythomeview.baml" />
+    <EmbeddedResource Include="resources\images\baricons\account.png" LogicalName="resources/images/baricons/account.png" />
+    <EmbeddedResource Include="resources\images\baricons\tv_show_png_icon.png" LogicalName="resources/images/baricons/tv_show_png_icon.png" />
+    <EmbeddedResource Include="views\mviews\songinfoview.baml" LogicalName="views/mviews/songinfoview.baml" />
+    <EmbeddedResource Include="views\ytviews\ytchannelview.baml" LogicalName="views/ytviews/ytchannelview.baml" />
+    <EmbeddedResource Include="views\musicplaylistsview.baml" LogicalName="views/musicplaylistsview.baml" />
+    <EmbeddedResource Include="resources\images\baricons\logout.png" LogicalName="resources/images/baricons/logout.png" />
+    <EmbeddedResource Include="views\ytviews\ythistoryvideoview.baml" LogicalName="views/ytviews/ythistoryvideoview.baml" />
+    <EmbeddedResource Include="resources\images\yt\no_thumbnail.png" LogicalName="resources/images/yt/no_thumbnail.png" />
+    <EmbeddedResource Include="test\miniffmeplayercontrol.baml" LogicalName="test/miniffmeplayercontrol.baml" />
+    <EmbeddedResource Include="resources\images\default\default_song.png" LogicalName="resources/images/default/default_song.png" />
+    <EmbeddedResource Include="views\mviews\playlistsonglistview.baml" LogicalName="views/mviews/playlistsonglistview.baml" />
+    <EmbeddedResource Include="resources\styles\livelisttemplate.baml" LogicalName="resources/styles/livelisttemplate.baml" />
+    <EmbeddedResource Include="resources\images\default\default_album.png" LogicalName="resources/images/default/default_album.png" />
+    <EmbeddedResource Include="resources\images\baricons\quran.png" LogicalName="resources/images/baricons/quran.png" />
+    <EmbeddedResource Include="views\quranview.baml" LogicalName="views/quranview.baml" />
+    <EmbeddedResource Include="views\moviesview.baml" LogicalName="views/moviesview.baml" />
+    <EmbeddedResource Include="resources\images\bg.jpg" LogicalName="resources/images/bg.jpg" />
+    <EmbeddedResource Include="views\entertainmentcenterview.baml" LogicalName="views/entertainmentcenterview.baml" />
+    <EmbeddedResource Include="views\ytviews\ytlikedview.baml" LogicalName="views/ytviews/ytlikedview.baml" />
+    <EmbeddedResource Include="app.baml" LogicalName="app.baml" />
+    <EmbeddedResource Include="views\seriesview.baml" LogicalName="views/seriesview.baml" />
+    <EmbeddedResource Include="views\mviews\artistsview.baml" LogicalName="views/mviews/artistsview.baml" />
+    <EmbeddedResource Include="resources\images\splash.png" LogicalName="resources/images/splash.png" />
+    <EmbeddedResource Include="resources\images\rent_movie.png" LogicalName="resources/images/rent_movie.png" />
+    <EmbeddedResource Include="vfRB9mRnhub5PNrSjB.fq2DahF657vgaUrbK9" LogicalName="vfRB9mRnhub5PNrSjB.fq2DahF657vgaUrbK9" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="HandyControl">
+      <HintPath>..\PROTV\HandyControl.dll</HintPath>
+    </Reference>
+    <Reference Include="PROTV.Abstractions">
+      <HintPath>..\PROTV\PROTV.Abstractions.dll</HintPath>
+    </Reference>
+    <Reference Include="PROTV.DataAccess">
+      <HintPath>..\PROTV\PROTV.DataAccess.dll</HintPath>
+    </Reference>
+    <Reference Include="ffme.win">
+      <HintPath>..\PROTV\ffme.win.dll</HintPath>
+    </Reference>
+    <Reference Include="FFmpeg.AutoGen">
+      <HintPath>..\PROTV\FFmpeg.AutoGen.dll</HintPath>
+    </Reference>
+    <Reference Include="Refit">
+      <HintPath>..\PROTV\Refit.dll</HintPath>
+    </Reference>
+    <Reference Include="Autofac">
+      <HintPath>..\PROTV\Autofac.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.Data.Sqlite">
+      <HintPath>..\PROTV\Microsoft.Data.Sqlite.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.EntityFrameworkCore">
+      <HintPath>..\PROTV\Microsoft.EntityFrameworkCore.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.EntityFrameworkCore.Sqlite">
+      <HintPath>..\PROTV\Microsoft.EntityFrameworkCore.Sqlite.dll</HintPath>
+    </Reference>
+    <Reference Include="AutoUpdater.NET">
+      <HintPath>..\PROTV\AutoUpdater.NET.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>
