@@ -1,4 +1,4 @@
-# PROTV for Jellyfin: v0.5 (Pre-release)
+# PROTV for Jellyfin: v0.6.1 (Pre-release)
 
 Watch your PROTV channels inside Jellyfin Live TV, with a program guide, channel logos, a management dashboard and a PROTV tab on the Jellyfin home page.
 
