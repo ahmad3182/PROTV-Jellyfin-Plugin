@@ -126,7 +126,34 @@ internal static class ProTvRequirements
         ("Custom Tabs", CustomTabsAssembly, "fbacd0b6-fd46-4a05-b0a4-2045d6a135b0")
     };
 
+    private static readonly object CheckGate = new();
+    private static ProTvCompanionReport? _cachedReport;
+    private static DateTime _cachedReportUtc = DateTime.MinValue;
+    private static readonly TimeSpan CheckLifetime = TimeSpan.FromSeconds(45);
+
+    // Reads every plugin folder's manifest from disk, and is asked for on every dashboard menu
+    // build and every tab status call, so the answer is kept for a short while.
     public static ProTvCompanionReport Check()
+    {
+        lock (CheckGate)
+        {
+            if (_cachedReport is not null && DateTime.UtcNow - _cachedReportUtc < CheckLifetime)
+            {
+                return _cachedReport;
+            }
+        }
+
+        var report = CheckUncached();
+        lock (CheckGate)
+        {
+            _cachedReport = report;
+            _cachedReportUtc = DateTime.UtcNow;
+        }
+
+        return report;
+    }
+
+    private static ProTvCompanionReport CheckUncached()
     {
         var installed = FindInstalledPluginIds(out var known, out var pluginFolders);
         var requirements = new List<ProTvRequirement>(Companions.Length);

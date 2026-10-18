@@ -1,0 +1,51 @@
+# ---------------------------------------------------------------
+# PRIVATE: never publish these.
+# Your PROTV login lives in the plugin settings file, and the folder you
+# worked in contains the vendor's own app files, captured traffic and
+# decompiled code. None of that belongs in a public repository.
+# ---------------------------------------------------------------
+PROTV.Plugin.xml
+**/PROTV.Plugin.xml
+PROTV.zip
+authservice.txt
+mainplayer.txt
+PROTV_PROJECT_CONTEXT.md
+_decompiled*/
+**/_decompiled*/
+*.pcap
+*.pcapng
+*.har
+*.log
+
+# Release output (built by make-release.ps1 and uploaded to GitHub releases)
+*.zip
+release/
+
+# ---------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------
+bin/
+obj/
+publish/
+artifacts/
+*.dll
+*.pdb
+*.nupkg
+*.cache
+project.lock.json
+.dotnet/
+
+# ---------------------------------------------------------------
+# Editors and OS
+# ---------------------------------------------------------------
+.vs/
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.user
+*.suo
+*.swp
+~$*
+.DS_Store
+Thumbs.db
+desktop.ini

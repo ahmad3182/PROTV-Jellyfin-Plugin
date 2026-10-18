@@ -35,7 +35,7 @@ public sealed class ProTvServiceRegistrator : IPluginServiceRegistrator
             return;
         }
 
-        serviceCollection.AddSingleton<ProTvApiClient>(services => new ProTvApiClient(
+        serviceCollection.AddSingleton<ProTvApiClient>(services => ProTvSharedClient.GetOrCreate(
             new HttpClient(),
             services.GetRequiredService<ILogger<ProTvApiClient>>(),
             () => ResolveConfiguration(services)));

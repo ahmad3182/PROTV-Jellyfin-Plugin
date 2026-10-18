@@ -63,9 +63,44 @@ public sealed class PluginConfiguration : BasePluginConfiguration
     // Turn this off to keep PROTV running without the tab.
     public bool RequireCompanionPlugins { get; set; } = true;
 
+    // ---- VOD (films, series and episodes) ----
+
+    // Mirrors the PROTV film catalogue into the "PROTV VOD" library the plugin creates, so films
+    // play through Jellyfin in every app (web, Android TV, mobile) like any other library.
+    public bool VodMoviesEnabled { get; set; } = true;
+
+    // Same for series, their seasons and their episodes.
+    public bool VodSeriesEnabled { get; set; } = true;
+
+    // Downloads each title's poster into the library. On the first sync this is the slowest part;
+    // turn it off to build the library from the metadata alone.
+    public bool VodDownloadPosters { get; set; } = true;
+
+    // Downloads the subtitle track PROTV has for a film or an episode next to its stream, so
+    // Jellyfin offers it while playing. PROTV ships one for most of the catalogue.
+    public bool VodDownloadSubtitles { get; set; } = true;
+
+    // Hard limit, in gigabytes, on everything the sync downloads (posters, subtitles, the library
+    // icons). Once it is reached the sync still mirrors the catalogue but stops downloading.
+    // 0 = no limit.
+    public double VodAssetBudgetGb { get; set; } = 5;
+
+    // The address the ".strm" files point at, i.e. this Jellyfin server. Leave it empty to let the
+    // plugin ask Jellyfin for its own LAN address (correct on nearly every setup).
+    public string VodStreamBaseUrl { get; set; } = string.Empty;
+
+    // How often Jellyfin runs the VOD sync (hours). Only used the first time the task is created.
+    public int VodSyncIntervalHours { get; set; } = 12;
+
+    // Secret that signs the links in the VOD .strm files. Created automatically the first time it
+    // is needed; clearing it makes the next sync write new links.
+    public string VodStreamSecret { get; set; } = string.Empty;
+
+    // After a complete sync, remove the films and series PROTV no longer lists.
+    public bool VodRemoveDeletedTitles { get; set; } = true;
+
     // Per-channel customisation (rename, hide, order, logo). Keyed by the PROTV channel id.
     public ProTvChannelOverride[] ChannelOverrides { get; set; } = Array.Empty<ProTvChannelOverride>();
-
     // Snapshot of the channels PROTV returned last time, so the dashboard can list them.
     public ProTvKnownChannel[] KnownChannels { get; set; } = Array.Empty<ProTvKnownChannel>();
 }

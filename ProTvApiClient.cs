@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging;
 
 namespace PROTV.Plugin;
 
-public sealed class ProTvApiClient
+public sealed partial class ProTvApiClient
 {
     private const string ChannelImageBaseUrl = "http://10.1.0.9:80/";
     private readonly HttpClient _httpClient;
@@ -360,17 +360,25 @@ public sealed class ProTvApiClient
         return response.Data ?? Array.Empty<ProTvEpgChannel>();
     }
 
-    private async Task<T> SendAsync<T>(HttpMethod method, string path, CancellationToken cancellationToken)
+    private Task<T> SendAsync<T>(HttpMethod method, string path, CancellationToken cancellationToken)
+        => SendAsync<T>(method, path, addDeviceHeaders: false, acceptLanguage: null, cancellationToken);
+
+    private async Task<T> SendAsync<T>(
+        HttpMethod method,
+        string path,
+        bool addDeviceHeaders,
+        string? acceptLanguage,
+        CancellationToken cancellationToken)
     {
         await EnsureAuthenticatedAsync(cancellationToken);
-        using var response = await SendAuthorizedAsync(method, path, cancellationToken);
+        using var response = await SendAuthorizedAsync(method, path, addDeviceHeaders, acceptLanguage, cancellationToken);
         if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
         {
             _accessToken = null;
             _refreshToken = null;
             _tokenCredentialKey = null;
             await EnsureAuthenticatedAsync(cancellationToken);
-            using var retry = await SendAuthorizedAsync(method, path, cancellationToken);
+            using var retry = await SendAuthorizedAsync(method, path, addDeviceHeaders, acceptLanguage, cancellationToken);
             retry.EnsureSuccessStatusCode();
             return await retry.Content.ReadFromJsonAsync<T>(cancellationToken: cancellationToken)
                 ?? throw new InvalidOperationException("PROTV returned an empty response.");
@@ -385,9 +393,28 @@ public sealed class ProTvApiClient
         HttpMethod method,
         string path,
         CancellationToken cancellationToken)
+        => SendAuthorizedAsync(method, path, addDeviceHeaders: false, acceptLanguage: null, cancellationToken);
+
+    private Task<HttpResponseMessage> SendAuthorizedAsync(
+        HttpMethod method,
+        string path,
+        bool addDeviceHeaders,
+        string? acceptLanguage,
+        CancellationToken cancellationToken)
     {
         var request = new HttpRequestMessage(method, BuildUri(path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
+        if (addDeviceHeaders)
+        {
+            // The VOD endpoints are the ones the desktop app calls with its full device header set;
+            // the live TV endpoints work without them, so only VOD asks for them.
+            AddDeviceHeaders(request, acceptLanguage ?? "en-US");
+        }
+        else if (!string.IsNullOrWhiteSpace(acceptLanguage))
+        {
+            request.Headers.Add("Accept-Language", acceptLanguage);
+        }
+
         return SendAndDisposeRequestAsync(request, cancellationToken);
     }
 
@@ -457,10 +484,7 @@ public sealed class ProTvApiClient
             var device = ProTvDeviceInfo.Detect(configuration);
             var payload = new ProTvLoginRequest(username, password, device.IpAddress);
             var json = JsonSerializer.Serialize(payload);
-            _logger.LogInformation(
-                "PROTV logging in with saved credentials. UserName={UserName}, PasswordLength={PasswordLength}",
-                username,
-                password.Length);
+            _logger.LogInformation("PROTV logging in with the saved credentials (username and password are configured).");
             using var request = new HttpRequestMessage(HttpMethod.Post, BuildUri("api/Account/Login"))
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
@@ -513,10 +537,10 @@ public sealed class ProTvApiClient
             : token.Trim();
     }
 
-    private void AddDeviceHeaders(HttpRequestMessage request)
+    private void AddDeviceHeaders(HttpRequestMessage request, string acceptLanguage = "en-US")
     {
         var device = ProTvDeviceInfo.Detect(Configuration);
-        request.Headers.Add("Accept-Language", "en-US");
+        request.Headers.Add("Accept-Language", acceptLanguage);
         request.Headers.Add("device-type", "Desktop");
         request.Headers.Add("device-os", "Windows10");
         request.Headers.Add("app-version", Configuration.AppVersion);

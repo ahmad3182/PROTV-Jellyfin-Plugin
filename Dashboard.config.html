@@ -13,6 +13,10 @@
                     #protvDashboardPage .protvNotice.protvWarn { border-left-color: #e0a100; background: rgba(224, 161, 0, .15); }
                     #protvDashboardPage .protvNotice.protvOk { border-left-color: #4caf50; background: rgba(76, 175, 80, .12); }
                     #protvDashboardPage .protvNotice.protvBad { border-left-color: #f44336; background: rgba(244, 67, 54, .15); }
+
+            /* The same colours for the short warnings that sit inside a line of status text. */
+            #protvDashboardPage span.protvWarn { color: #e0a100; }
+            #protvDashboardPage span.protvBad { color: #f44336; }
                     #protvDashboardPage .protvTableWrap { max-height: 480px; overflow: auto; }
                     #protvDashboardPage table.protvTable { border-collapse: collapse; width: 100%; }
                     #protvDashboardPage table.protvTable th,
@@ -23,6 +27,7 @@
                     #protvDashboardPage .protvRow { align-items: center; display: flex; flex-wrap: wrap; gap: .75em; margin-bottom: .75em; }
                     #protvDashboardPage .protvLogo { height: 24px; max-width: 48px; object-fit: contain; vertical-align: middle; }
                     #protvDashboardPage .protvSmall { font-size: .9em; opacity: .8; }
+                    #protvDashboardPage textarea.protvReport { background: transparent; border: 1px solid rgba(127, 127, 127, .45); border-radius: 4px; box-sizing: border-box; color: inherit; font-family: monospace; font-size: .85em; margin-top: .75em; padding: .6em; width: 100%; }
                 </style>
 
                 <form id="protvDashboardForm">
@@ -63,6 +68,11 @@
                             <input is="emby-input" id="protvDeviceModel" type="text" label="Device model" placeholder="Jellyfin Server" />
                             <div class="fieldDescription">Name this server reports to PROTV. Use a fixed name when running in Docker.</div>
                         </div>
+                        <div class="protvRow">
+                            <button is="emby-button" type="button" id="protvTestConnection" class="raised emby-button"><span>Test connection</span></button>
+                            <span class="protvSmall">Uses the values above, even if they are not saved yet.</span>
+                        </div>
+                        <div id="protvTestResult" class="protvNotice" style="display: none;"></div>
                     </div>
 
                     <div class="verticalSection">
@@ -163,6 +173,74 @@
                                 When on, PROTV does not start its tuner, guide or pages unless all three plugins are installed. Turn it off to keep Live TV running without the home page tab.
                             </div>
                         </div>
+                    </div>
+
+                    <div class="verticalSection">
+                        <div class="sectionTitleContainer flex align-items-center">
+                            <h3 class="sectionTitle">Films and series (VOD)</h3>
+                        </div>
+                        <div class="fieldDescription" style="margin-bottom: 1em;">
+                            Builds a real Jellyfin library (<strong id="protvVodLibraryName">PROTV VOD</strong>) out of the PROTV film and series catalogue, so films and episodes play in every Jellyfin app, not only in the web browser. Every film and episode becomes a Jellyfin item whose stream is resolved from PROTV when it is played. The first sync writes the whole catalogue and can take a while; later runs only add what is new.
+                        </div>
+                        <div class="inputContainer">
+                            <label style="align-items: center; display: flex; gap: .5em;">
+                                <input type="checkbox" id="protvVodMovies" />
+                                <span>Mirror films into the library</span>
+                            </label>
+                        </div>
+                        <div class="inputContainer">
+                            <label style="align-items: center; display: flex; gap: .5em;">
+                                <input type="checkbox" id="protvVodSeries" />
+                                <span>Mirror series, seasons and episodes into the library</span>
+                            </label>
+                        </div>
+                        <div class="inputContainer">
+                            <label style="align-items: center; display: flex; gap: .5em;">
+                                <input type="checkbox" id="protvVodPosters" />
+                                <span>Download posters</span>
+                            </label>
+                            <div class="fieldDescription">The slowest part of the first sync. Turn it off to keep only the metadata and streams, and add posters with a later sync.</div>
+                        </div>
+                        <div class="inputContainer">
+                            <label style="align-items: center; display: flex; gap: .5em;">
+                                <input type="checkbox" id="protvVodSubtitles" />
+                                <span>Download subtitles</span>
+                            </label>
+                            <div class="fieldDescription">Fetches the subtitle PROTV has for a film or an episode and stores it next to the stream, so Jellyfin offers it while playing. Skipped once the download limit below is reached.</div>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvVodAssetBudgetGb" type="number" min="0" step="0.5" label="Download limit (GB)" />
+                            <div class="fieldDescription">How much the sync may download in total (posters, subtitles and the library icons). Once the limit is reached the catalogue is still mirrored, but nothing more is downloaded. 0 = no limit.</div>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvVodStreamBaseUrl" type="text" label="Stream address" placeholder="leave empty to detect this server" />
+                            <div class="fieldDescription">
+                                The address the library's streams point back at. Leave it empty to let PROTV ask Jellyfin for its own LAN address, which is right on almost every setup. Set it when clients reach this server through another name, for example <code>http://jellyfin.lan:8096</code>.
+                            </div>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" id="protvVodSyncIntervalHours" type="number" min="0" step="1" label="Sync every (hours)" />
+                            <div class="fieldDescription">How often Jellyfin runs the VOD sync. Used the first time the task is created; change it later in Dashboard &gt; Scheduled Tasks.</div>
+                        </div>
+                        <div class="protvRow">
+                            <button is="emby-button" type="button" id="protvVodSync" class="raised emby-button"><span>Sync now</span></button>
+                            <button is="emby-button" type="button" id="protvVodRefreshStatus" class="emby-button"><span>Refresh status</span></button>
+                        </div>
+                        <div class="protvSmall" id="protvVodStatus"></div>
+                    </div>
+
+                    <div class="verticalSection">
+                        <div class="sectionTitleContainer flex align-items-center">
+                            <h3 class="sectionTitle">Diagnostics</h3>
+                        </div>
+                        <div class="fieldDescription" style="margin-bottom: 1em;">
+                            Creates a report of versions, companion plugins, settings and recent errors to paste into a bug report. Passwords and secrets are never included, and IP addresses are shortened.
+                        </div>
+                        <div class="protvRow">
+                            <button is="emby-button" type="button" id="protvCreateReport" class="raised emby-button"><span>Create diagnostic report</span></button>
+                        </div>
+                        <div class="protvSmall" id="protvReportStatus"></div>
+                        <textarea id="protvReportText" class="protvReport" rows="16" readonly style="display: none;"></textarea>
                     </div>
 
                     <div>
@@ -266,7 +344,14 @@
                     StreamAnalyzeDurationMs: Math.max(0, parseInt(el('protvAnalyzeMs').value, 10) || 0),
                     FrontpageTabEnabled: el('protvFrontpageTabEnabled').checked,
                     FrontpageTabTitle: el('protvFrontpageTabTitle').value.trim(),
-                    RequireCompanionPlugins: el('protvRequireCompanions').checked
+                    RequireCompanionPlugins: el('protvRequireCompanions').checked,
+                    VodMoviesEnabled: el('protvVodMovies').checked,
+                    VodSeriesEnabled: el('protvVodSeries').checked,
+                    VodDownloadPosters: el('protvVodPosters').checked,
+                    VodDownloadSubtitles: el('protvVodSubtitles').checked,
+                    VodAssetBudgetGb: readBudget(),
+                    VodStreamBaseUrl: el('protvVodStreamBaseUrl').value.trim(),
+                    VodSyncIntervalHours: Math.max(0, parseInt(el('protvVodSyncIntervalHours').value, 10) || 0)
                 };
             }
 
@@ -288,6 +373,13 @@
                 el('protvFrontpageTabEnabled').checked = config.FrontpageTabEnabled !== false;
                 el('protvFrontpageTabTitle').value = config.FrontpageTabTitle || '';
                 el('protvRequireCompanions').checked = config.RequireCompanionPlugins !== false;
+                el('protvVodMovies').checked = config.VodMoviesEnabled !== false;
+                el('protvVodSeries').checked = config.VodSeriesEnabled !== false;
+                el('protvVodPosters').checked = config.VodDownloadPosters !== false;
+                el('protvVodSubtitles').checked = config.VodDownloadSubtitles !== false;
+                el('protvVodAssetBudgetGb').value = config.VodAssetBudgetGb == null ? 5 : config.VodAssetBudgetGb;
+                el('protvVodStreamBaseUrl').value = config.VodStreamBaseUrl || '';
+                el('protvVodSyncIntervalHours').value = config.VodSyncIntervalHours == null ? 12 : config.VodSyncIntervalHours;
                 el('protvDashTitle').textContent = config.DashboardTitle || 'PROTV';
                 el('protvWelcome').textContent = config.WelcomeMessage || '';
                 el('protvWelcome').style.display = config.WelcomeMessage ? 'block' : 'none';
@@ -351,6 +443,119 @@
                 });
             }
 
+            // ---- VOD sync ----
+
+            var vodPollTimer = null;
+
+            function formatCount(value) {
+                try {
+                    return Number(value || 0).toLocaleString();
+                } catch (ignored) {
+                    return String(value || 0);
+                }
+            }
+
+            function formatTime(value) {
+                if (!value) { return 'never'; }
+                try {
+                    return new Date(value).toLocaleString();
+                } catch (ignored) {
+                    return String(value);
+                }
+            }
+
+            function formatBytes(value) {
+                var bytes = Number(value || 0);
+                if (!bytes) { return '0 MB'; }
+                if (bytes >= 1073741824) { return (bytes / 1073741824).toFixed(2) + ' GB'; }
+                if (bytes >= 1048576) { return (bytes / 1048576).toFixed(1) + ' MB'; }
+                return Math.round(bytes / 1024) + ' KB';
+            }
+
+            // An empty or nonsense limit falls back to the default, so the sync can never be let
+            // loose without one by accident; 0 still means "no limit".
+            function readBudget() {
+                var value = parseFloat(el('protvVodAssetBudgetGb').value);
+                return isNaN(value) || value < 0 ? 5 : value;
+            }
+
+            function renderVodStatus(status) {
+                var node = el('protvVodStatus');
+                if (!node || !status) { return; }
+                if (status.libraryName) { el('protvVodLibraryName').textContent = status.libraryName; }
+
+                var parts = [];
+                if (status.running) {
+                    parts.push('Syncing now...');
+                } else if (!status.moviesEnabled && !status.seriesEnabled) {
+                    parts.push('VOD is switched off.');
+                } else if (!status.libraryRegistered || status.seriesLibraryRegistered === false) {
+                    parts.push('The libraries are not in Jellyfin yet; press "Sync now".');
+                } else {
+                    parts.push('Libraries ready');
+                }
+
+                parts.push(formatCount(status.movies) + ' films');
+                parts.push(formatCount(status.series) + ' series');
+                parts.push(formatCount(status.episodes) + ' episodes');
+                if (status.downloadSubtitles !== false) {
+                    parts.push(formatCount(status.subtitles) + ' subtitles');
+                }
+
+                parts.push('last sync: ' + formatTime(status.lastSyncUtc));
+
+                var html = esc(parts.join(' \u00b7 '));
+                if (status.streamBaseUrl) {
+                    html += '<br />Streams point at: <code>' + esc(status.streamBaseUrl) + '</code>';
+                }
+
+                if (status.assetBytes) {
+                    html += '<br />Downloaded: <code>' + esc(formatBytes(status.assetBytes)) + '</code>';
+                    if (status.assetBudgetBytes > 0) {
+                        html += ' of <code>' + esc(formatBytes(status.assetBudgetBytes)) + '</code>';
+                        if (status.budgetReached) {
+                            html += ' <span class="protvWarn">(limit reached: no more posters or subtitles were downloaded)</span>';
+                        }
+                    }
+                }
+
+                html += '<br />Libraries: <code>' + esc(status.libraryName || 'PROTV VOD') + '</code>';
+                if (status.seriesLibraryName) {
+                    html += ' and <code>' + esc(status.seriesLibraryName) + '</code>';
+                    if (status.seriesLibraryRegistered === false) {
+                        html += ' <span class="protvBad">(series library missing)</span>';
+                    }
+                }
+
+                if (status.libraryPath) {
+                    html += '<br />Files: <code>' + esc(status.libraryPath) + '</code>';
+                }
+
+                if (status.lastError) {
+                    html += '<br /><span class="protvBad">Last error: ' + esc(status.lastError) + '</span>';
+                }
+
+                node.innerHTML = html;
+            }
+
+            function refreshVodStatus() {
+                return ApiClient.getJSON(ApiClient.getUrl('PROTV/Vod/Status')).then(function (status) {
+                    renderVodStatus(status);
+                    // While a sync is running the page follows it, so the counts move on their own.
+                    if (status && status.running) {
+                        if (vodPollTimer) { window.clearTimeout(vodPollTimer); }
+                        vodPollTimer = window.setTimeout(function () {
+                            return refreshVodStatus();
+                        }, 3000);
+                    } else if (vodPollTimer) {
+                        window.clearTimeout(vodPollTimer);
+                        vodPollTimer = null;
+                    }
+                }, function () {
+                    // A build without the VOD endpoints simply shows nothing here.
+                });
+            }
+
             function load() {
                 if (loading) { return; }
                 loading = true;
@@ -363,6 +568,7 @@
                     fillFields(config);
                     renderChannels();
                     loadCompanionNotice();
+                    refreshVodStatus();
                 }).catch(function (error) {
                     return describeError(error).then(function (message) {
                         Dashboard.alert({ title: 'PROTV', text: 'Could not load the PROTV settings. ' + message });
@@ -401,6 +607,102 @@
                     Dashboard.hideLoadingMsg();
                     describeError(error).then(function (message) {
                         Dashboard.alert({ title: 'PROTV', text: 'Could not start the guide refresh. ' + message });
+                    });
+                });
+            });
+
+            el('protvVodSync').addEventListener('click', function () {
+                Dashboard.showLoadingMsg();
+                ApiClient.ajax({
+                    type: 'POST',
+                    url: ApiClient.getUrl('PROTV/Vod/Sync'),
+                    dataType: 'json'
+                }).then(function (status) {
+                    Dashboard.hideLoadingMsg();
+                    renderVodStatus(status);
+                    refreshVodStatus();
+                }).catch(function (error) {
+                    Dashboard.hideLoadingMsg();
+                    describeError(error).then(function (message) {
+                        Dashboard.alert({ title: 'PROTV', text: 'Could not start the VOD sync. ' + message });
+                    });
+                });
+            });
+
+            el('protvVodRefreshStatus').addEventListener('click', function () {
+                refreshVodStatus();
+            });
+
+            // ---- connection test and diagnostic report ----
+
+            function showTestResult(kind, text) {
+                var box = el('protvTestResult');
+                box.className = 'protvNotice ' + kind;
+                box.textContent = text;
+                box.style.display = 'block';
+            }
+
+            el('protvTestConnection').addEventListener('click', function () {
+                var fields = readFields();
+                var button = el('protvTestConnection');
+                button.disabled = true;
+                showTestResult('protvWarn', 'Testing the connection...');
+                ApiClient.ajax({
+                    type: 'POST',
+                    url: ApiClient.getUrl('PROTV/TestConnection'),
+                    data: JSON.stringify({
+                        ApiBaseUrl: fields.ApiBaseUrl,
+                        Username: fields.Username,
+                        Password: fields.Password,
+                        AppId: fields.AppId,
+                        DeviceModel: fields.DeviceModel,
+                        DeviceIpAddress: fields.DeviceIpAddress,
+                        DeviceMacAddress: fields.DeviceMacAddress,
+                        RouterMacAddress: fields.RouterMacAddress
+                    }),
+                    contentType: 'application/json',
+                    dataType: 'json'
+                }).then(function (result) {
+                    showTestResult(result && result.ok ? 'protvOk' : 'protvBad', (result && result.message) || 'The server sent no answer.');
+                }).catch(function (error) {
+                    describeError(error).then(function (message) {
+                        showTestResult('protvBad', 'The test could not run. ' + message);
+                    });
+                }).then(function () {
+                    button.disabled = false;
+                });
+            });
+
+            // The clipboard API only works on https pages; plain http (a LAN address) needs the
+            // old select-and-copy way, and when that fails the text is left selected for Ctrl+C.
+            function copyText(text) {
+                if (navigator.clipboard && window.isSecureContext) {
+                    return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return false; });
+                }
+
+                var area = el('protvReportText');
+                area.focus();
+                area.select();
+                var copied = false;
+                try { copied = document.execCommand('copy'); } catch (ignored) { }
+                return Promise.resolve(copied);
+            }
+
+            el('protvCreateReport').addEventListener('click', function () {
+                var status = el('protvReportStatus');
+                status.textContent = 'Creating the report...';
+                ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('PROTV/Diagnostics'), dataType: 'text' }).then(function (text) {
+                    var area = el('protvReportText');
+                    area.value = text;
+                    area.style.display = 'block';
+                    return copyText(text).then(function (copied) {
+                        status.textContent = copied
+                            ? 'Report copied. Paste it into your bug report.'
+                            : 'Select the text above and copy it with Ctrl+C.';
+                    });
+                }).catch(function (error) {
+                    describeError(error).then(function (message) {
+                        status.textContent = 'Could not create the report. ' + message;
                     });
                 });
             });

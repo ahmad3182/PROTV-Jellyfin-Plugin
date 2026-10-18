@@ -11,7 +11,7 @@ namespace PROTV.Plugin;
 //   /PROTV/Status   - the companion plugin report used by the PROTV dashboard page.
 [ApiController]
 [Route("PROTV")]
-public sealed class ProTvTabController : ControllerBase
+public sealed partial class ProTvTabController : ControllerBase
 {
     private const string TabScriptResource = "PROTV.Plugin.Tab.config.js";
 

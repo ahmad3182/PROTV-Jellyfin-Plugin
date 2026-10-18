@@ -2,8 +2,11 @@ using System.Collections;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Text.Json;
+using MediaBrowser.Common.Configuration;
+using MediaBrowser.Controller;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -25,18 +28,27 @@ internal sealed class ProTvLifecycleService : IHostedService
     private readonly ILogger<ProTvLifecycleService> _logger;
     private readonly ProTvStartupReport _report;
     private readonly ILibraryManager _libraryManager;
+    private readonly IApplicationPaths _applicationPaths;
+    private readonly IServerApplicationHost _applicationHost;
+    private readonly ISessionManager _sessionManager;
 
     public ProTvLifecycleService(
         IServerConfigurationManager configurationManager,
         ITaskManager taskManager,
         ProTvStartupReport report,
         ILibraryManager libraryManager,
+        IApplicationPaths applicationPaths,
+        IServerApplicationHost applicationHost,
+        ISessionManager sessionManager,
         ILogger<ProTvLifecycleService> logger)
     {
         _configurationManager = configurationManager;
         _taskManager = taskManager;
         _report = report;
         _libraryManager = libraryManager;
+        _applicationPaths = applicationPaths;
+        _applicationHost = applicationHost;
+        _sessionManager = sessionManager;
         _logger = logger;
     }
 
@@ -47,6 +59,11 @@ internal sealed class ProTvLifecycleService : IHostedService
         // Lets the home page tab resolve a PROTV channel to the Jellyfin Live TV channel item, so
         // tapping a channel in the tab plays the real channel.
         ProTvLiveTvItems.Attach(_libraryManager);
+
+        // The VOD side needs the same library manager to tell whether a film or an episode has been
+        // synced yet, plus where to keep its library and how to reach this server.
+        ProTvVodItems.Attach(_libraryManager, _applicationPaths.DataPath);
+        ProTvVodLibrary.Attach(_libraryManager, _applicationHost, _sessionManager, _applicationPaths.DataPath, _logger);
 
         // The companion plugins are what draw PROTV's sidebar entry and Jellyfin home page tab,
         // so their state is always reported: it is the first thing to check when the tab is
@@ -256,6 +273,26 @@ internal sealed class ProTvLifecycleService : IHostedService
         catch (Exception exception)
         {
             _logger.LogDebug(exception, "Could not remove the PROTV home page tab.");
+        }
+
+        try
+        {
+            // The PROTV libraries are the plugin's own; take them out of Jellyfin again (the files
+            // it downloaded stay on disk, under <data>/protv-vod).
+            foreach (var name in new[] { ProTvVodPaths.LibraryName, ProTvVodPaths.SeriesLibraryName })
+            {
+                var hasLibrary = _libraryManager.GetVirtualFolders()
+                    .Any(folder => string.Equals(folder.Name, name, StringComparison.OrdinalIgnoreCase));
+                if (hasLibrary)
+                {
+                    _libraryManager.RemoveVirtualFolder(name, true).GetAwaiter().GetResult();
+                    _logger.LogInformation("The {LibraryName} library was removed from Jellyfin.", name);
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Could not remove the PROTV VOD libraries. Remove them from the Jellyfin libraries page.");
         }
 
         try

@@ -106,7 +106,11 @@ public sealed class ProTvTunerHost : ITunerHost, IConfigurableTunerHost
                 Type = MediaSourceType.Default,
                 IsRemote = true,
                 IsInfiniteStream = true,
-                SupportsDirectPlay = true,
+                // The stream is a multicast address only the server can read reliably, so clients
+                // are never asked to open it themselves: Jellyfin hands every app (web, mobile,
+                // Android TV, ...) its own HTTP/HLS stream of the channel instead. Apps that were
+                // told to "direct play" would otherwise be given "udp://@..." and fail.
+                SupportsDirectPlay = false,
                 SupportsDirectStream = true,
                 SupportsTranscoding = true,
                 RequiresOpening = true,
@@ -226,7 +230,7 @@ internal static class ProTvChannelOrdering
 
 internal sealed class ProTvLiveStream : ILiveStream
 {
-    private readonly HttpClient _httpClient = new();
+    private static readonly HttpClient SharedHttpClient = new();
     private readonly bool _isUdp;
     private readonly string _url;
     private Stream? _stream;
@@ -247,7 +251,9 @@ internal sealed class ProTvLiveStream : ILiveStream
             Type = MediaSourceType.Default,
             IsRemote = true,
             IsInfiniteStream = true,
-            SupportsDirectPlay = true,
+            // See GetChannelStreamMediaSources: Jellyfin serves the channel over HTTP/HLS to every
+            // client, so no app is ever pointed at the multicast address itself.
+            SupportsDirectPlay = false,
             SupportsDirectStream = true,
             SupportsTranscoding = true,
             Container = "ts",
@@ -268,7 +274,7 @@ internal sealed class ProTvLiveStream : ILiveStream
     {
         _stream = _isUdp
             ? await MulticastStream.OpenAsync(_url, openCancellationToken)
-            : await _httpClient.GetStreamAsync(_url, openCancellationToken);
+            : await SharedHttpClient.GetStreamAsync(_url, openCancellationToken);
     }
 
     public Task Close()
@@ -286,7 +292,6 @@ internal sealed class ProTvLiveStream : ILiveStream
     public void Dispose()
     {
         _stream?.Dispose();
-        _httpClient.Dispose();
     }
 }
 

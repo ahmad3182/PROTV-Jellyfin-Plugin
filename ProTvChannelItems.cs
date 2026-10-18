@@ -80,9 +80,10 @@ internal static class ProTvLiveTvItems
     // briefly because the tab asks per render.
     private static Dictionary<string, Guid>? Snapshot()
     {
+        ILibraryManager? manager;
         lock (Gate)
         {
-            var manager = _libraryManager;
+            manager = _libraryManager;
             if (manager is null)
             {
                 return null;
@@ -92,29 +93,36 @@ internal static class ProTvLiveTvItems
             {
                 return _byExternalId;
             }
+        }
 
-            var channels = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
-            try
+        // The library query runs outside the lock, so other requests are not held up behind it.
+        var channels = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var item in manager.GetItemList(new InternalItemsQuery
             {
-                foreach (var item in manager.GetItemList(new InternalItemsQuery
+                IncludeItemTypes = new[] { BaseItemKind.LiveTvChannel },
+                Recursive = true,
+                DtoOptions = new DtoOptions(false)
+            }))
+            {
+                if (!string.IsNullOrWhiteSpace(item.ExternalId))
                 {
-                    IncludeItemTypes = new[] { BaseItemKind.LiveTvChannel },
-                    Recursive = true,
-                    DtoOptions = new DtoOptions(false)
-                }))
-                {
-                    if (!string.IsNullOrWhiteSpace(item.ExternalId))
-                    {
-                        channels[item.ExternalId] = item.Id;
-                    }
+                    channels[item.ExternalId] = item.Id;
                 }
             }
-            catch
+        }
+        catch
+        {
+            // Keep the previous view instead of failing the channel list.
+            lock (Gate)
             {
-                // Keep the previous view instead of failing the channel list.
                 return _byExternalId;
             }
+        }
 
+        lock (Gate)
+        {
             _byExternalId = channels;
             _cachedAtUtc = DateTime.UtcNow;
             return _byExternalId;

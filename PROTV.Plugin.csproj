@@ -17,6 +17,7 @@
     <EmbeddedResource Include="Configuration.config.html" />
     <EmbeddedResource Include="Dashboard.config.html" />
     <EmbeddedResource Include="Tab.config.js" LogicalName="PROTV.Plugin.Tab.config.js" />
+    <EmbeddedResource Include="ProTvVodLibraryIcon.jpg" LogicalName="PROTV.Plugin.ProTvVodLibraryIcon.jpg" />
   </ItemGroup>
   <ItemGroup>
     <Compile Remove="_decompiled_wpf\**\*.cs" />

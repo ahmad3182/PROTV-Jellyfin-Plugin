@@ -77,8 +77,6 @@ public sealed class ProTvTabStatus
 
 internal static class ProTvTabData
 {
-    private static readonly HttpClient LiveHttpClient = new();
-
     // The saved channel list (kept fresh by the tuner / guide refresh) is used by default so the
     // tab is instant and does not depend on the PROTV service being reachable. refresh=true asks
     // PROTV again, the same way a guide refresh would.
@@ -165,8 +163,7 @@ internal static class ProTvTabData
 
         try
         {
-            var client = new ProTvApiClient(LiveHttpClient, NullLogger<ProTvApiClient>.Instance, () => configuration);
-            return await client.GetChannelsAsync(cancellationToken);
+            return await ProTvSharedClient.Get().GetChannelsAsync(cancellationToken);
         }
         catch (Exception)
         {
