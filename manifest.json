@@ -2,6 +2,7 @@
   {
     "guid": "4a0a66d7-04ae-4c4d-b9af-8cb6a1c44f86",
     "name": "PROTV",
+    "imageUrl": "https://raw.githubusercontent.com/ahmad3182/PROTV-Jellyfin-Plugin/Stable/logo.png",
     "description": "Watch PROTV channels in Jellyfin Live TV with a program guide, a management dashboard and a home page tab. Early development pre-release; requires a valid PROTV subscription and works in Syria only.",
     "overview": "PROTV Live TV integration for Jellyfin (early pre-release).",
     "owner": "ahmad3182",
