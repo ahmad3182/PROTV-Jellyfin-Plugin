@@ -270,24 +270,6 @@ They cover channel sorting and overrides, password encryption, parental PIN hash
 version/repository parsing, EPG parsing and server-offset conversion, VOD sweep safeguards and genre
 preservation, and the live-stream contracts.
 
-## Releasing
-
-Tag a version and GitHub Actions does the rest:
-
-```
-git tag v0.8.0
-git push origin v0.8.0
-```
-
-`.github/workflows/release.yml` builds the plugin with the tag as its version (the version Jellyfin
-shows comes from `PROTV.Plugin.csproj`), packs `PROTV_<version>.zip` holding `PROTV.Plugin.dll`,
-publishes it as a GitHub release, and writes the release's MD5 into `manifest.json` so a plugin
-catalog can offer the update. `.github/workflows/build.yml` compiles every push and pull request and
-runs the tests in `tests/`.
-
-To do the same by hand on Windows, run `.\make-release.ps1 -GitHubUser <you> -Repo <repo> -Version 0.8.0`
-and upload the zip it prints.
-
 ## Credits
 
 - **IAmParadox27** for Plugin Pages, File Transformation and Custom Tabs.
