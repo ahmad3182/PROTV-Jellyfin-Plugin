@@ -1,14 +1,43 @@
+using System.Text.Json.Serialization;
+using System.Xml.Serialization;
 using MediaBrowser.Model.Plugins;
 
 namespace PROTV.Plugin;
 
 public sealed class PluginConfiguration : BasePluginConfiguration
 {
+    private string _password = string.Empty;
+    private bool _passwordWasPlainText;
+    private string _vodStreamSecret = string.Empty;
+    private bool _vodStreamSecretWasPlainText;
+
     public string ApiBaseUrl { get; set; } = "http://10.1.0.8:82";
 
     public string Username { get; set; } = string.Empty;
 
-    public string Password { get; set; } = string.Empty;
+    // Stored encrypted (enc:v1:...) whenever the secret key can be created. The getter always
+    // returns the envelope so Jellyfin's XML/JSON serializers never write the password in the
+    // clear; runtime code must read PasswordValue instead.
+    public string Password
+    {
+        get => ProTvSecretStore.Protect(_password);
+        set
+        {
+            var raw = value ?? string.Empty;
+            _passwordWasPlainText = !string.IsNullOrEmpty(raw) && !ProTvSecretStore.IsProtected(raw);
+            _password = ProTvSecretStore.Protect(raw);
+        }
+    }
+
+    // The decrypted password for login. Never serialized.
+    [XmlIgnore]
+    [JsonIgnore]
+    public string PasswordValue => ProTvSecretStore.Unprotect(_password);
+
+    // A password saved by an older build is plain text; the plugin rewrites it encrypted on start.
+    [XmlIgnore]
+    [JsonIgnore]
+    public bool PasswordNeedsMigration => _passwordWasPlainText || ProTvSecretStore.NeedsProtection(_password);
 
     public string AppId { get; set; } = "ca88f40a-3056-4c52-9614-8d75a3b0b178";
 
@@ -47,6 +76,20 @@ public sealed class PluginConfiguration : BasePluginConfiguration
     public string SidebarLabel { get; set; } = "PROTV";
 
     public string SidebarIcon { get; set; } = "live_tv";
+
+    // ---- Interface language ----
+
+    // Language of the PROTV dashboard page and the Jellyfin home page tab.
+    //   "auto" - follow each browser's own language (Arabic browsers get Arabic)
+    //   "en"   - always English
+    //   "ar"   - always Arabic, drawn right to left
+    public string UiLanguage { get; set; } = "auto";
+
+    // ---- Update notice ----
+
+    // GitHub repository ("owner/repo") used by the dashboard's update check. Leave it empty to
+    // hide the update notice; the check only reads the public latest-release endpoint.
+    public string UpdateRepository { get; set; } = string.Empty;
 
     // ---- Jellyfin home page tab ----
 
@@ -93,16 +136,61 @@ public sealed class PluginConfiguration : BasePluginConfiguration
     public int VodSyncIntervalHours { get; set; } = 12;
 
     // Secret that signs the links in the VOD .strm files. Created automatically the first time it
-    // is needed; clearing it makes the next sync write new links.
-    public string VodStreamSecret { get; set; } = string.Empty;
+    // is needed; clearing it makes the next sync write new links. Like the password it is stored
+    // encrypted, so a config file or config-only backup cannot be used to mint stream links.
+    public string VodStreamSecret
+    {
+        get => ProTvSecretStore.Protect(_vodStreamSecret);
+        set
+        {
+            var raw = value ?? string.Empty;
+            _vodStreamSecretWasPlainText = !string.IsNullOrEmpty(raw) && !ProTvSecretStore.IsProtected(raw);
+            _vodStreamSecret = ProTvSecretStore.Protect(raw);
+        }
+    }
+
+    // The decrypted VOD signing secret. Never serialized.
+    [XmlIgnore]
+    [JsonIgnore]
+    public string VodStreamSecretValue => ProTvSecretStore.Unprotect(_vodStreamSecret);
+
+    // A signing secret written by a build before encryption was added.
+    [XmlIgnore]
+    [JsonIgnore]
+    public bool VodStreamSecretNeedsMigration
+        => _vodStreamSecretWasPlainText || ProTvSecretStore.NeedsProtection(_vodStreamSecret);
+
+    // Startup persists once if either secret still needs its encrypted envelope.
+    [XmlIgnore]
+    [JsonIgnore]
+    public bool SecretsNeedMigration => PasswordNeedsMigration || VodStreamSecretNeedsMigration;
 
     // After a complete sync, remove the films and series PROTV no longer lists.
     public bool VodRemoveDeletedTitles { get; set; } = true;
 
-    // Per-channel customisation (rename, hide, order, logo). Keyed by the PROTV channel id.
+    // Per-channel customisation (rename, hide, order, logo, favourite, group, parental lock).
+    // Keyed by the PROTV channel id.
     public ProTvChannelOverride[] ChannelOverrides { get; set; } = Array.Empty<ProTvChannelOverride>();
+
+    // Named channel groups shown as sections on the home page tab. Order = display order.
+    // A channel joins a group through its override's GroupId.
+    public ProTvChannelGroup[] ChannelGroups { get; set; } = Array.Empty<ProTvChannelGroup>();
+
+    // ---- Parental controls ----
+
+    // When true the tab asks for the PIN before playing a channel whose override has
+    // ParentalLocked set. The PIN hash lives in <data>/protv/parental.json, never in this file.
+    public bool ParentalEnabled { get; set; }
+
     // Snapshot of the channels PROTV returned last time, so the dashboard can list them.
     public ProTvKnownChannel[] KnownChannels { get; set; } = Array.Empty<ProTvKnownChannel>();
+}
+
+public sealed class ProTvChannelGroup
+{
+    public string Id { get; set; } = string.Empty;
+
+    public string Name { get; set; } = string.Empty;
 }
 
 public sealed class ProTvChannelOverride
@@ -117,6 +205,15 @@ public sealed class ProTvChannelOverride
     public int Priority { get; set; }
 
     public string LogoUrl { get; set; } = string.Empty;
+
+    // Shown first in a "Favourites" section on the tab and flagged to Jellyfin's Live TV.
+    public bool IsFavorite { get; set; }
+
+    // Id of a ProTvChannelGroup. Empty = no group ("Other channels" on the tab).
+    public string GroupId { get; set; } = string.Empty;
+
+    // Hidden behind the parental PIN on the tab when ParentalEnabled is on.
+    public bool ParentalLocked { get; set; }
 }
 
 public sealed class ProTvKnownChannel

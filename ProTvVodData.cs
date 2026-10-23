@@ -185,6 +185,14 @@ public sealed class ProTvVodStatus
     [JsonPropertyName("downloadSubtitles")]
     public bool DownloadSubtitles { get; set; }
 
+    // Whether the sync downloads posters (and so whether the leftovers it reports make sense).
+    [JsonPropertyName("downloadPosters")]
+    public bool DownloadPosters { get; set; }
+
+    // running | completed | cancelled | failed. Empty for a state written by an older build.
+    [JsonPropertyName("lastRunStatus")]
+    public string LastRunStatus { get; set; } = string.Empty;
+
     // Everything the sync has downloaded (posters, subtitles, the library icons) and the limit an
     // admin set for it.
     [JsonPropertyName("assetBytes")]
@@ -246,9 +254,11 @@ internal static class ProTvVodData
 
         lock (SecretGate)
         {
-            if (string.IsNullOrWhiteSpace(configuration.VodStreamSecret))
+            var secret = configuration.VodStreamSecretValue;
+            if (string.IsNullOrWhiteSpace(secret))
             {
-                configuration.VodStreamSecret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+                secret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+                configuration.VodStreamSecret = secret;
                 try
                 {
                     Plugin.Instance?.PersistConfiguration();
@@ -259,10 +269,10 @@ internal static class ProTvVodData
                 }
             }
 
-            if (!string.Equals(_secretSource, configuration.VodStreamSecret, StringComparison.Ordinal))
+            if (!string.Equals(_secretSource, secret, StringComparison.Ordinal))
             {
-                _secretSource = configuration.VodStreamSecret;
-                _secretBytes = Encoding.UTF8.GetBytes(_secretSource);
+                _secretSource = secret;
+                _secretBytes = Encoding.UTF8.GetBytes(secret);
             }
 
             return _secretBytes;
@@ -595,11 +605,14 @@ internal static class ProTvVodData
             SeriesLibraryPath = ProTvVodLibrary.SeriesLibraryRoot,
             SeriesLibraryRegistered = ProTvVodLibrary.IsSeriesLibraryRegistered,
             StreamBaseUrl = ProTvVodLibrary.ActiveStreamBaseUrl,
-            Movies = state.Movies,
-            Series = state.Series,
-            Episodes = state.Episodes,
+            // While a run is in flight the dashboard follows its counters; otherwise it shows the
+            // counts the last complete run stored, which the run in flight does not touch.
+            Movies = running ? state.RunMovies : state.Movies,
+            Series = running ? state.RunSeries : state.Series,
+            Episodes = running ? state.RunEpisodes : state.Episodes,
             Subtitles = state.Subtitles,
             DownloadSubtitles = configuration?.VodDownloadSubtitles ?? true,
+            DownloadPosters = configuration?.VodDownloadPosters ?? true,
             AssetBytes = state.AssetBytes,
             AssetBudgetBytes = budget,
             // Worked out from what is on the disk and the limit in force now, so raising the limit
@@ -607,7 +620,8 @@ internal static class ProTvVodData
             BudgetReached = budget > 0 && state.AssetBytes >= budget,
             LastSyncUtc = state.LastSyncUtc?.ToString("o", CultureInfo.InvariantCulture),
             Running = running,
-            LastError = lastError ?? state.LastError
+            LastError = lastError ?? state.LastError,
+            LastRunStatus = state.LastRunStatus ?? string.Empty
         };
     }
 
@@ -779,7 +793,7 @@ internal static class ProTvVodData
         if (configuration is null
             || string.IsNullOrWhiteSpace(configuration.ApiBaseUrl)
             || string.IsNullOrWhiteSpace(configuration.Username)
-            || string.IsNullOrEmpty(configuration.Password))
+            || string.IsNullOrEmpty(configuration.PasswordValue))
         {
             return null;
         }

@@ -4,7 +4,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$GitHubUser,
     [Parameter(Mandatory = $true)][string]$Repo,
-    [string]$Version = "0.5.0.0",
+    [string]$Version = "0.8.0",
     [string]$DllPath = ".\bin\Release\net10.0\PROTV.Plugin.dll",
     [string]$ManifestPath = ".\manifest.json"
 )

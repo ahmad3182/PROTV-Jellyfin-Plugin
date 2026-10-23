@@ -17,14 +17,24 @@ public sealed class ProTvVodSyncTask : IScheduledTask
 
     public string Category => "PROTV";
 
-    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => new[]
+    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
     {
-        new TaskTriggerInfo
+        // Jellyfin stores the trigger when the task is first created; changing the setting later
+        // is also possible from Dashboard > Scheduled Tasks. A zero or negative value falls back
+        // to the previous twelve-hour default.
+        var hours = Plugin.Instance?.Configuration.VodSyncIntervalHours ?? 12;
+        if (hours <= 0) { hours = 12; }
+        if (hours > 24 * 30) { hours = 24 * 30; }
+
+        return new[]
         {
-            Type = TaskTriggerInfoType.IntervalTrigger,
-            IntervalTicks = TimeSpan.FromHours(12).Ticks
-        }
-    };
+            new TaskTriggerInfo
+            {
+                Type = TaskTriggerInfoType.IntervalTrigger,
+                IntervalTicks = TimeSpan.FromHours(hours).Ticks
+            }
+        };
+    }
 
     public Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
         => ProTvVodLibrary.SyncAsync(progress, cancellationToken);

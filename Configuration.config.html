@@ -29,7 +29,7 @@
 
                         <div class="inputContainer">
                             <input is="emby-input" id="protvPassword" type="password" autocomplete="current-password" label="Password" />
-                            <div class="fieldDescription">Stored in this server's plugin settings.</div>
+                            <div class="fieldDescription">Encrypted in this server's plugin settings with a key kept outside the settings file. Leave the field empty to keep the saved password.</div>
                         </div>
                     </div>
 
@@ -68,6 +68,101 @@
             var page = document.querySelector('#protvConfigPage');
             var form = document.querySelector('#protvConfigurationForm');
             var loading = false;
+            var savedPassword = '';
+            var language = 'en';
+
+            // The same display-layer Arabic approach as the dashboard and the home page tab: only
+            // interface text and attributes are swapped; field values are never translated.
+            var AR = [
+                [/^Sign in with your PROTV account to add its channels, guide data and logos to Live TV\.$/, 'سجّل الدخول بحساب PROTV لإضافة قنواته ودليل برامجه وشعاراته إلى البث المباشر.'],
+                [/^Account$/, 'الحساب'],
+                [/^Username$/, 'اسم المستخدم'],
+                [/^Password$/, 'كلمة المرور'],
+                [/^Encrypted in this server's plugin settings with a key kept outside the settings file\. Leave the field empty to keep the saved password\.$/, 'مشفّرة في إعدادات الإضافة على هذا الخادم، والمفتاح محفوظ خارج ملف الإعدادات. اترك الحقل فارغاً للإبقاء على كلمة المرور المحفوظة.'],
+                [/^Service$/, 'الخدمة'],
+                [/^API base URL$/, 'عنوان خدمة PROTV'],
+                [/^Address of the PROTV service, including the port\.$/, 'عنوان خدمة PROTV مع المنفذ.'],
+                [/^App ID$/, 'معرّف التطبيق'],
+                [/^Identifier the PROTV app signs in with\. Change it only if the service requires a different one\.$/, 'المعرّف الذي يسجّل به تطبيق PROTV الدخول. غيّره فقط إذا طلبت الخدمة غير ذلك.'],
+                [/^Device model$/, 'طراز الجهاز'],
+                [/^Name this server reports to PROTV\. Use a fixed name when running in Docker\.$/, 'الاسم الذي يقدّمه هذا الخادم إلى PROTV. استخدم اسماً ثابتاً عند التشغيل في Docker.'],
+                [/^Save$/, 'حفظ'],
+                [/^Settings saved\.$/, 'تم حفظ الإعدادات.']
+            ];
+
+            function resolveLanguage(value) {
+                var wanted = String(value || 'auto').toLowerCase();
+                if (wanted === 'ar' || wanted === 'en') { return wanted; }
+
+                var browser = String((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();
+                return browser.indexOf('ar') === 0 ? 'ar' : 'en';
+            }
+
+            function translate(text) {
+                var value = String(text == null ? '' : text);
+                if (language !== 'ar') { return value; }
+
+                var flat = value.replace(/\s+/g, ' ').trim();
+                if (!flat) { return value; }
+
+                var swapped = flat;
+                for (var i = 0; i < AR.length; i++) {
+                    swapped = swapped.replace(AR[i][0], AR[i][1]);
+                }
+
+                return swapped === flat ? value : swapped;
+            }
+
+            function translateNode(root) {
+                if (!root) { return; }
+                if (root.nodeType === 1 && root.classList && root.classList.contains('protvValue')) {
+                    return;
+                }
+
+                for (var i = 0; i < root.childNodes.length; i++) {
+                    var child = root.childNodes[i];
+                    if (child.nodeType === 3) {
+                        var text = String(child.nodeValue || '');
+                        if (text.trim()) {
+                            var swapped = translate(text);
+                            if (swapped !== text) { child.nodeValue = swapped; }
+                        }
+
+                        continue;
+                    }
+
+                    if (child.nodeType !== 1 || child.tagName === 'SCRIPT' || child.tagName === 'STYLE') {
+                        continue;
+                    }
+
+                    var attributes = ['label', 'placeholder', 'title', 'aria-label'];
+                    for (var a = 0; a < attributes.length; a++) {
+                        var value = child.getAttribute(attributes[a]);
+                        if (!value) { continue; }
+
+                        var translated = translate(value);
+                        child.setAttribute(attributes[a], translated);
+                        if (attributes[a] === 'label' && 'label' in child) {
+                            try { child.label = translated; } catch (ignored) { /* attribute is enough */ }
+                        }
+                    }
+
+                    translateNode(child);
+                }
+            }
+
+            function localizePage() {
+                var arabic = language === 'ar';
+                page.setAttribute('dir', arabic ? 'rtl' : 'ltr');
+                page.setAttribute('lang', arabic ? 'ar' : 'en');
+                if (arabic) { translateNode(page); }
+            }
+
+            function savedPlaceholder() {
+                return language === 'ar'
+                    ? 'محفوظ (مشفّر) — اتركه فارغاً للإبقاء عليه'
+                    : 'Saved (encrypted) — leave empty to keep it';
+            }
 
             function field(id) {
                 return document.querySelector('#' + id);
@@ -91,11 +186,15 @@
                 loading = true;
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    language = resolveLanguage(config.UiLanguage);
                     field('protvApiBaseUrl').value = config.ApiBaseUrl || '';
                     field('protvUsername').value = config.Username || '';
-                    field('protvPassword').value = config.Password || '';
+                    savedPassword = config.Password || '';
+                    field('protvPassword').value = '';
+                    field('protvPassword').setAttribute('placeholder', savedPassword ? savedPlaceholder() : '');
                     field('protvAppId').value = config.AppId || '';
                     field('protvDeviceModel').value = config.DeviceModel || '';
+                    localizePage();
                 }).catch(function (error) {
                     describeError(error).then(function (message) {
                         Dashboard.alert({ title: 'PROTV', text: 'Could not load the saved settings. ' + message });
@@ -134,7 +233,7 @@
                     // fall through to the plain message
                 }
 
-                Dashboard.alert({ title: 'PROTV', text: 'Settings saved.' });
+                Dashboard.alert({ title: 'PROTV', text: translate('Settings saved.') });
             }
 
             // Load on every event the dashboard may raise when it shows this page, and once now.
@@ -145,6 +244,7 @@
             form.addEventListener('submit', function (event) {
                 event.preventDefault();
                 var values = readFields();
+                values.Password = field('protvPassword').value || savedPassword;
                 var updateResult;
                 Dashboard.showLoadingMsg();
 
@@ -159,6 +259,7 @@
                     return ApiClient.getPluginConfiguration(pluginId);
                 }).then(function (stored) {
                     var mismatch = Object.keys(values).filter(function (key) {
+                        if (key === 'Password') { return false; }
                         return (stored[key] || '') !== values[key];
                     });
                     if (mismatch.length) {
@@ -166,6 +267,13 @@
                     }
 
                     Dashboard.hideLoadingMsg();
+                    // Keep the next save from sending the old password: the server may have
+                    // encrypted the value again, so take the stored envelope and clear the box.
+                    savedPassword = stored.Password || values.Password;
+                    field('protvPassword').value = '';
+                    field('protvPassword').setAttribute(
+                        'placeholder',
+                        savedPassword ? savedPlaceholder() : '');
                     showSaved(updateResult);
                 }).catch(function (error) {
                     Dashboard.hideLoadingMsg();

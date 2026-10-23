@@ -122,7 +122,22 @@ internal static class ProTvDiagnostics
             return Fail("The API base URL is not a valid web address. It looks like http://10.1.0.8:82.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrEmpty(request.Password))
+        // The dashboard leaves the password box empty when the saved password should be reused.
+        // Only fall back when the username is unchanged, so a renamed account cannot accidentally
+        // be tested with the old account's password.
+        var password = request.Password;
+        if (string.IsNullOrEmpty(password))
+        {
+            var saved = Plugin.Instance?.Configuration;
+            if (saved is not null
+                && !string.IsNullOrWhiteSpace(saved.Username)
+                && string.Equals(saved.Username.Trim(), request.Username?.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                password = saved.PasswordValue;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrEmpty(password))
         {
             return Fail("Enter the username and password first.");
         }
@@ -137,7 +152,7 @@ internal static class ProTvDiagnostics
         {
             ApiBaseUrl = url,
             Username = request.Username.Trim(),
-            Password = request.Password,
+            Password = password,
             AppId = string.IsNullOrWhiteSpace(request.AppId) ? defaults.AppId : request.AppId.Trim(),
             DeviceModel = string.IsNullOrWhiteSpace(request.DeviceModel) ? defaults.DeviceModel : request.DeviceModel.Trim(),
             DeviceIpAddress = (request.DeviceIpAddress ?? string.Empty).Trim(),
@@ -233,7 +248,8 @@ internal static class ProTvDiagnostics
         {
             Line($"API address: {configuration.ApiBaseUrl}");
             Line($"Username: {Set(configuration.Username)}");
-            Line($"Password: {Set(configuration.Password)}");
+            Line($"Password: {Set(configuration.PasswordValue)}");
+            Line($"Secret encryption: {(ProTvSecretStore.IsConfigured ? "key available" : "key unavailable; secrets may be stored in clear text")}");
             Line($"Device model: {configuration.DeviceModel}");
             Line($"Device IP / device MAC / router MAC: {Set(configuration.DeviceIpAddress)} / {Set(configuration.DeviceMacAddress)} / {Set(configuration.RouterMacAddress)}");
             Line($"Multicast interface: {(string.IsNullOrWhiteSpace(configuration.MulticastInterfaceAddress) ? "automatic" : "set")}");
@@ -312,7 +328,14 @@ internal static class ProTvDiagnostics
             return text;
         }
 
-        foreach (var secret in new[] { configuration.Password, configuration.Username, configuration.VodStreamSecret })
+        foreach (var secret in new[]
+        {
+            configuration.Password,
+            configuration.PasswordValue,
+            configuration.Username,
+            configuration.VodStreamSecret,
+            configuration.VodStreamSecretValue
+        })
         {
             if (!string.IsNullOrEmpty(secret) && secret.Length >= 4)
             {

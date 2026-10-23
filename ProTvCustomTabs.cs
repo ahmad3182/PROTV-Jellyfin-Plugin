@@ -43,9 +43,12 @@ internal static class ProTvCustomTabs
         var title = string.IsNullOrWhiteSpace(Plugin.Instance?.Configuration.FrontpageTabTitle)
             ? "PROTV"
             : Plugin.Instance!.Configuration.FrontpageTabTitle.Trim();
+        // This string becomes part of the home page's HTML. Escape it, or a title containing a tag
+        // would be injected into every user's page.
+        var safeTitle = System.Text.Encodings.Web.HtmlEncoder.Default.Encode(title);
         return $$"""
             <div id="protvTabRoot" class="protvTabRoot" {{Marker}}="true">
-              <div class="protvTabLoading">Loading {{title}} channels...</div>
+              <div class="protvTabLoading">Loading {{safeTitle}} channels...</div>
             </div>
             <script type="text/javascript">
             (function () {

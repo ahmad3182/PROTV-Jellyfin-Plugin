@@ -36,7 +36,7 @@ public sealed class ProTvServiceRegistrator : IPluginServiceRegistrator
         }
 
         serviceCollection.AddSingleton<ProTvApiClient>(services => ProTvSharedClient.GetOrCreate(
-            new HttpClient(),
+            null,
             services.GetRequiredService<ILogger<ProTvApiClient>>(),
             () => ResolveConfiguration(services)));
         serviceCollection.AddSingleton<ITunerHost, ProTvTunerHost>();
@@ -116,6 +116,6 @@ public sealed class ProTvServiceRegistrator : IPluginServiceRegistrator
     {
         return configuration is not null
             && !string.IsNullOrWhiteSpace(configuration.Username)
-            && !string.IsNullOrEmpty(configuration.Password);
+            && !string.IsNullOrEmpty(configuration.PasswordValue);
     }
 }

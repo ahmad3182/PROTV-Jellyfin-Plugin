@@ -65,7 +65,9 @@ public sealed class ProTvTunerHost : ITunerHost, IConfigurableTunerHost
             ImageUrl = ProTvChannelOrdering.LogoUrl(channel),
             HasImage = !string.IsNullOrWhiteSpace(ProTvChannelOrdering.LogoUrl(channel)),
             ChannelType = ChannelType.TV,
-            TunerHostId = TunerType
+            TunerHostId = TunerType,
+            IsFavorite = ProTvChannelOrdering.IsFavorite(channel.Id),
+            ChannelGroup = ProTvChannelOrdering.GroupName(channel.Id)
         }).ToList();
     }
 
@@ -88,7 +90,11 @@ public sealed class ProTvTunerHost : ITunerHost, IConfigurableTunerHost
         }
 
         var streamUrl = await _api.WatchChannelAsync(int.Parse(channelId), cancellationToken);
-        return new ProTvLiveStream(streamUrl, channelId, TunerType);
+        var stream = new ProTvLiveStream(streamUrl, channelId, TunerType);
+        // Open here, on the async request path, so the synchronous GetStream() used by Jellyfin's
+        // direct recorder normally finds an already-open stream.
+        await stream.Open(cancellationToken).ConfigureAwait(false);
+        return stream;
     }
 
     public async Task<List<MediaSourceInfo>> GetChannelStreamMediaSources(string channelId, CancellationToken cancellationToken)
@@ -162,11 +168,16 @@ internal static class ProTvChannelOrdering
         return value > 0 ? value : null;
     }
 
-    private static IReadOnlyDictionary<int, ProTvChannelOverride> LoadOverrides()
+    private static Dictionary<int, ProTvChannelOverride> BuildOverrides(
+        IReadOnlyList<ProTvChannelOverride>? items)
     {
-        var items = Plugin.Instance?.Configuration.ChannelOverrides ?? Array.Empty<ProTvChannelOverride>();
-        return items.GroupBy(item => item.ChannelId).ToDictionary(group => group.Key, group => group.Last());
+        return (items ?? Array.Empty<ProTvChannelOverride>())
+            .GroupBy(item => item.ChannelId)
+            .ToDictionary(group => group.Key, group => group.Last());
     }
+
+    private static Dictionary<int, ProTvChannelOverride> LoadOverrides()
+        => BuildOverrides(Plugin.Instance?.Configuration.ChannelOverrides);
 
     // Rebuilds PROTV channels from the snapshot ProTvApiClient keeps of the last channel list it
     // fetched, so the tuner (and the home page tab) can keep working while PROTV is unreachable.
@@ -184,8 +195,12 @@ internal static class ProTvChannelOrdering
 
     // Logo from the dashboard override when set, otherwise the one PROTV provides.
     public static string? LogoUrl(ProTvChannel channel)
+        => LogoUrl(channel, LoadOverrides());
+
+    internal static string? LogoUrl(
+        ProTvChannel channel,
+        IReadOnlyDictionary<int, ProTvChannelOverride> overrides)
     {
-        var overrides = LoadOverrides();
         if (overrides.TryGetValue(channel.Id, out var item) && !string.IsNullOrWhiteSpace(item.LogoUrl))
         {
             return item.LogoUrl.Trim();
@@ -195,8 +210,13 @@ internal static class ProTvChannelOrdering
     }
 
     public static string DisplayName(ProTvChannel channel)
+        => DisplayName(channel, LoadOverrides());
+
+    internal static string DisplayName(
+        ProTvChannel channel,
+        IReadOnlyDictionary<int, ProTvChannelOverride> overrides)
     {
-        if (LoadOverrides().TryGetValue(channel.Id, out var item) && !string.IsNullOrWhiteSpace(item.CustomName))
+        if (overrides.TryGetValue(channel.Id, out var item) && !string.IsNullOrWhiteSpace(item.CustomName))
         {
             return item.CustomName.Trim();
         }
@@ -214,26 +234,57 @@ internal static class ProTvChannelOrdering
         return $"Channel {channel.Id}";
     }
 
+    public static bool IsFavorite(int channelId)
+        => LoadOverrides().TryGetValue(channelId, out var item) && item.IsFavorite;
+
+    // First group name that contains this channel, for Jellyfin's ChannelInfo.ChannelGroup.
+    public static string? GroupName(int channelId)
+    {
+        var configuration = Plugin.Instance?.Configuration;
+        if (configuration is null)
+        {
+            return null;
+        }
+
+        var overrides = BuildOverrides(configuration.ChannelOverrides);
+        if (!overrides.TryGetValue(channelId, out var item) || string.IsNullOrWhiteSpace(item.GroupId))
+        {
+            return null;
+        }
+
+        return configuration.ChannelGroups?
+            .FirstOrDefault(group => string.Equals(group.Id, item.GroupId, StringComparison.OrdinalIgnoreCase))?
+            .Name?
+            .Trim();
+    }
+
     // Drops channels hidden on the dashboard, then orders by dashboard priority (default 0),
     // then alphabetically by display name; ties broken by channel id so the order is stable.
     public static List<ProTvChannel> Sort(IEnumerable<ProTvChannel> channels)
+        => Sort(channels, Plugin.Instance?.Configuration.ChannelOverrides);
+
+    internal static List<ProTvChannel> Sort(
+        IEnumerable<ProTvChannel> channels,
+        IReadOnlyList<ProTvChannelOverride>? overrideItems)
     {
-        var overrides = LoadOverrides();
+        var overrides = BuildOverrides(overrideItems);
         return channels
             .Where(channel => !(overrides.TryGetValue(channel.Id, out var item) && item.Hidden))
             .OrderBy(channel => overrides.TryGetValue(channel.Id, out var item) ? item.Priority : 0)
-            .ThenBy(DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(channel => DisplayName(channel, overrides), StringComparer.OrdinalIgnoreCase)
             .ThenBy(channel => channel.Id)
             .ToList();
     }
 }
 
-internal sealed class ProTvLiveStream : ILiveStream
+internal sealed class ProTvLiveStream : ILiveStream, IDirectStreamProvider
 {
     private static readonly HttpClient SharedHttpClient = new();
     private readonly bool _isUdp;
     private readonly string _url;
+    private readonly SemaphoreSlim _openGate = new(1, 1);
     private Stream? _stream;
+    private bool _disposed;
 
     public ProTvLiveStream(string url, string channelId, string tunerHostId)
     {
@@ -272,9 +323,25 @@ internal sealed class ProTvLiveStream : ILiveStream
 
     public async Task Open(CancellationToken openCancellationToken)
     {
-        _stream = _isUdp
-            ? await MulticastStream.OpenAsync(_url, openCancellationToken)
-            : await SharedHttpClient.GetStreamAsync(_url, openCancellationToken);
+        if (_stream is not null)
+        {
+            return;
+        }
+
+        await _openGate.WaitAsync(openCancellationToken);
+        try
+        {
+            if (_stream is null)
+            {
+                _stream = _isUdp
+                    ? await MulticastStream.OpenAsync(_url, openCancellationToken)
+                    : await SharedHttpClient.GetStreamAsync(_url, openCancellationToken);
+            }
+        }
+        finally
+        {
+            _openGate.Release();
+        }
     }
 
     public Task Close()
@@ -284,14 +351,39 @@ internal sealed class ProTvLiveStream : ILiveStream
         return Task.CompletedTask;
     }
 
+    // Jellyfin's direct-stream endpoint and its DirectRecorder ask for the stream without calling
+    // Open (this tuner does not derive from BaseTunerHost), so open it lazily here. Returning a
+    // throw when it is not open made the direct-stream path fail even though the channel worked.
     public Stream GetStream()
     {
+        if (_stream is null)
+        {
+            // This interface is synchronous. Bound the compatibility open instead of blocking a
+            // request thread forever when PROTV or the multicast group is unreachable.
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            try
+            {
+                Open(timeout.Token).GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+                throw new TimeoutException("PROTV did not open the stream in time.");
+            }
+        }
+
         return _stream ?? throw new InvalidOperationException("The PROTV stream is not open.");
     }
 
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
         _stream?.Dispose();
+        _openGate.Dispose();
     }
 }
 
@@ -440,7 +532,10 @@ internal sealed class MulticastStream : Stream
 
     public override int Read(byte[] buffer, int offset, int count)
     {
-        return ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+        // A multicast group can be silent forever (wrong interface, no data). The sync Stream
+        // contract has no cancellation token, so use a bounded wait rather than hanging a thread.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        return ReadAsync(buffer.AsMemory(offset, count), timeout.Token).AsTask().GetAwaiter().GetResult();
     }
 
     protected override void Dispose(bool disposing)

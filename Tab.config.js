@@ -51,8 +51,25 @@
         vodItems: [],
         vodCategories: [],
         vodCategoryId: null,
-        vodSeries: null
+        vodSeries: null,
+        // Dashboard groups, in display order, and the token for a parental PIN unlock.
+        groups: [],
+        unlockToken: null,
+        // The "All" search view: one query across live channels, films and series.
+        allQuery: '',
+        allLoading: false,
+        allError: null,
+        allMovies: [],
+        allSeries: [],
+        // What is on now / next per PROTV channel id, filled in after the grid is drawn.
+        now: {}
     };
+
+    try {
+        state.unlockToken = window.sessionStorage.getItem('protvParentalUnlock') || null;
+    } catch (ignored) {
+        state.unlockToken = null;
+    }
     var waits = 0;
     var messageTimer = null;
     var vodSearchTimer = null;
@@ -62,7 +79,7 @@
         '.protvTabRoot{box-sizing:border-box;width:100%;padding:.5em 1.5em 3em;}',
         '.protvTabHeader{display:flex;flex-wrap:wrap;align-items:center;gap:.75em;margin:0 0 .5em;}',
         '.protvTabTitle{font-size:1.4em;font-weight:600;margin:0;}',
-        '.protvTabCount{font-size:.85em;opacity:.7;margin-right:auto;}',
+        '.protvTabCount{font-size:.85em;opacity:.7;margin-inline-end:auto;}',
         '.protvTabSearch,.protvTabButton{font:inherit;color:inherit;background:rgba(128,128,128,.15);',
         'border:1px solid rgba(128,128,128,.45);border-radius:4px;padding:.45em .8em;}',
         '.protvTabSearch{min-width:11em;}',
@@ -83,11 +100,33 @@
         '.protvTabInitials{font-size:1.5em;font-weight:600;opacity:.75;letter-spacing:.05em;}',
         '.protvTabName{font-size:.95em;font-weight:500;word-break:break-word;}',
         '.protvTabNumber{font-size:.75em;opacity:.6;}',
-        '.protvTabPlay{position:absolute;top:.35em;right:.35em;font-size:.9em;line-height:1;padding:.25em .4em;',
+        '.protvTabPlay{position:absolute;top:.35em;inset-inline-end:.35em;font-size:.9em;line-height:1;padding:.25em .4em;',
         'border:0;border-radius:4px;background:rgba(0,0,0,.35);color:#fff;cursor:pointer;opacity:0;}',
         '.protvTabCard:hover .protvTabPlay,.protvTabCard:focus .protvTabPlay{opacity:.85;}',
         '.protvTabPlay:hover{opacity:1;}',
-        '.protvTabBadge{position:absolute;top:.35em;left:.35em;font-size:.9em;line-height:1;}',
+        '.protvTabBadge{position:absolute;top:.35em;inset-inline-start:.35em;font-size:.9em;line-height:1;}',
+        // A channel the last health check could not get data for: still openable (the answer may be
+        // old), but visibly not worth waiting for.
+        '.protvTabCardOffline{opacity:.45;}',
+        '.protvTabCardOffline .protvTabLogo{filter:grayscale(1);}',
+        '.protvTabOffline{position:absolute;bottom:.35em;inset-inline-end:.35em;font-size:.85em;opacity:.9;}',
+        // The "On now" row: one chip per channel that is airing something, spanning the grid.
+        '.protvTabNowRow{grid-column:1/-1;display:flex;gap:.6em;overflow-x:auto;padding:.1em 0 .6em;}',
+        '.protvTabNowCard{flex:0 0 auto;min-width:12em;max-width:16em;background:rgba(128,128,128,.14);border-radius:.4em;padding:.5em .65em;cursor:pointer;text-align:start;}',
+        '.protvTabNowCard:hover{background:rgba(128,128,128,.24);}',
+        // Favourites / group sections on the channel tab.
+        '.protvTabSectionTitle{grid-column:1/-1;font-size:1.05em;font-weight:600;margin:.5em 0 0;padding-top:.55em;',
+        'border-top:1px solid rgba(128,128,128,.25);text-align:start;}',
+        '.protvTabSectionTitle:first-child{border-top:0;padding-top:0;}',
+        // A channel behind the parental PIN.
+        '.protvTabCardLocked .protvTabLogo{filter:grayscale(1);opacity:.55;}',
+        '.protvTabCardLocked .protvTabName{opacity:.75;}',
+        '.protvTabLock{position:absolute;top:.35em;inset-inline-start:.35em;font-size:.9em;line-height:1;}',
+        '.protvTabNowChannel{font-size:.8em;font-weight:600;opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+        '.protvTabNowTitle{font-size:.9em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+        '.protvTabNowNext{font-size:.78em;opacity:.6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+        '.protvTabProgress{height:3px;border-radius:2px;background:rgba(128,128,128,.35);margin:.25em 0;}',
+        '.protvTabProgressFill{height:100%;border-radius:2px;background:currentColor;opacity:.7;}',
         '.protvTabMessage{padding:.5em 0;opacity:.85;}',
         '.protvTabError{padding:1em;border-radius:6px;background:rgba(244,67,54,.18);}',
         '.protvTabNotice{padding:.6em 1em;border-radius:6px;background:rgba(0,164,220,.16);}',
@@ -120,6 +159,253 @@
         '.protvTabMore{margin-top:1em;}'
     ].join('');
 
+    // ---- Interface language ---------------------------------------------------------------
+    // The tab is injected into Jellyfin's own home page, so its markup cannot be rebuilt for a
+    // second language. The English text the tab writes is swapped in the DOM instead, and one
+    // observer keeps that in step with every later re-render. Arabic also flips the tab to right
+    // to left; the styles above use logical properties (inset-inline, margin-inline) so the layout
+    // mirrors with it. "auto" follows the browser, the dashboard setting wins otherwise.
+    var language = resolveLanguage('auto');
+    var languageObserver = null;
+    var WATCHED = ['placeholder', 'title', 'aria-label'];
+    // Text inside these is a value (a channel or a programme name), not interface text, so it is
+    // never swapped even if it happens to look like one of the strings above.
+    var VALUES = ['protvTabName', 'protvTabNowChannel', 'protvTabNowTitle', 'protvTabGroupName', 'protvTabPosterLabel'];
+
+    var AR = {
+        'Channels': 'القنوات',
+        'Films': 'أفلام',
+        'Series': 'مسلسلات',
+        'All': 'الكل',
+        'Favourites': 'المفضلة',
+        'Other channels': 'قنوات أخرى',
+        'Films and series': 'الأفلام والمسلسلات',
+        'Search channels, films and series': 'ابحث في القنوات والأفلام والمسلسلات',
+        'Searching...': 'جارٍ البحث...',
+        'Search channels, films and series.': 'ابحث في القنوات والأفلام والمسلسلات.',
+        'Type to search every live channel, film and series in PROTV.':
+            'اكتب للبحث في كل قنوات البث المباشر والأفلام والمسلسلات في PROTV.',
+        'PROTV is unavailable; showing the last channel list.':
+            'PROTV غير متاح؛ تُعرض آخر قائمة قنوات محفوظة.',
+        'Unlocked for this session.': 'تم الفتح لهذه الجلسة.',
+        'That PIN was not accepted. Try again.': 'لم يُقبل الرمز السري. حاول مرة أخرى.',
+        'Refresh': 'تحديث',
+        'Refreshing...': 'جارٍ التحديث...',
+        'Loading...': 'جارٍ التحميل...',
+        'Loading channels...': 'جارٍ تحميل القنوات...',
+        'Loading the PROTV catalogue...': 'جارٍ تحميل مكتبة PROTV...',
+        'Filter channels': 'ابحث في القنوات',
+        'Search films': 'ابحث في الأفلام',
+        'Search series': 'ابحث في المسلسلات',
+        'This series has no seasons listed yet.': 'لا توجد مواسم لهذا المسلسل بعد.',
+        'This channel has no Jellyfin Live TV entry yet.': 'هذه القناة غير مضافة إلى البث المباشر في Jellyfin بعد.',
+        'Sign in to Jellyfin again to see the PROTV channels.': 'أعد تسجيل الدخول إلى Jellyfin لعرض قنوات PROTV.',
+        'Sign in to Jellyfin again to browse the PROTV catalogue.': 'أعد تسجيل الدخول إلى Jellyfin لتصفح مكتبة PROTV.',
+        'Sign in to Jellyfin again to play this.': 'أعد تسجيل الدخول إلى Jellyfin للتشغيل.',
+        'The PROTV channel list could not be loaded. Is the PROTV plugin still running?':
+            'تعذّر تحميل قائمة قنوات PROTV. تأكد من أن إضافة PROTV ما زالت تعمل.',
+        'The PROTV catalogue could not be loaded. Check the PROTV settings on the dashboard page.':
+            'تعذّر تحميل مكتبة PROTV. تحقّق من إعدادات PROTV في لوحة التحكم.',
+        'No channels yet. Add the PROTV tuner to Live TV (or press Refresh) and the channels PROTV returns will be listed here.':
+            'لا توجد قنوات بعد. أضف موالف PROTV إلى البث المباشر (أو اضغط تحديث) وستظهر القنوات هنا.',
+        'Pick a channel to play it here (the same Live TV channel the rest of Jellyfin plays). Use \u2139 on a channel to open its Jellyfin page instead.':
+            'اختر قناة لتشغيلها هنا (نفس قناة البث المباشر التي يشغّلها Jellyfin). استخدم \u2139 لفتح صفحة القناة في Jellyfin.',
+        'Films and episodes play here once they are in the PROTV VOD library (see the PROTV dashboard page). Series open their season list.':
+            'تُشغَّل الأفلام والحلقات هنا بعد مزامنتها في مكتبة PROTV (راجع لوحة تحكم PROTV). المسلسلات تفتح قائمة المواسم.',
+        'If Live TV has no channels yet, run the Jellyfin "Refresh Guide" task.':
+            'إذا لم تظهر القنوات في البث المباشر، شغّل مهمة "تحديث دليل البرامج" في Jellyfin.',
+        'If the PROTV VOD library is empty, run the VOD sync from the PROTV dashboard page.':
+            'إذا كانت مكتبة PROTV فارغة، شغّل مزامنة VOD من لوحة تحكم PROTV.'
+    };
+
+    // Messages the tab assembles at run time: counts, titles and HTTP codes.
+    var AR_PATTERNS = [
+        [/^1 channel$/, 'قناة واحدة'],
+        [/^(\d+) channels$/, '$1 قناة'],
+        [/^(\d+) of (\d+) channels$/, '$1 من $2 قناة'],
+        [/^(\d+) films$/, '$1 فيلم'],
+        [/^(\d+) series$/, '$1 مسلسل'],
+        [/^(\d+) of (\d+) films$/, '$1 من $2 فيلم'],
+        [/^(\d+) of (\d+) series$/, '$1 من $2 مسلسل'],
+        [/^Load more \((\d+) of (\d+)\)$/, 'تحميل المزيد ($1 من $2)'],
+        [/^No channel matches "(.*)"\.$/, 'لا توجد قناة تطابق "$1".'],
+        [/^No PROTV title matches "(.*)"\.$/, 'لا يوجد عنوان في PROTV يطابق "$1".'],
+        [/^No results for "(.*)"\.$/, 'لا توجد نتائج لـ "$1".'],
+        [/^(\d+) results$/, '$1 نتيجة'],
+        [/^Enter the parental PIN to watch (.+)\.$/, 'أدخل رمز الرقابة الأبوية لمشاهدة $1.'],
+        [/^Season (\d+)$/, 'الموسم $1'],
+        [/^1 season$/, 'موسم واحد'],
+        [/^(\d+) seasons$/, '$1 مواسم'],
+        [/^1 min$/, 'دقيقة واحدة'],
+        [/^(\d+) min$/, '$1 دقيقة'],
+        [/^Open (.+) in Live TV$/, 'افتح $1 في البث المباشر'],
+        [/^(.+) is not in Live TV yet$/, '$1 غير مضافة إلى البث المباشر بعد'],
+        [/^(.+) has no stream right now$/, '$1 لا تبثّ حالياً'],
+        [/^Open (.+)$/, 'افتح $1'],
+        [/^Play (.+)$/, 'شغّل $1'],
+        [/^Channel (.+)$/, 'قناة $1'],
+        [/^Next: (.+)$/, 'التالي: $1'],
+        [/^The PROTV channel list could not be loaded \(HTTP (\d+)\)\.$/, 'تعذّر تحميل قائمة قنوات PROTV (HTTP $1).'],
+        [/^The PROTV catalogue could not be loaded \(HTTP (\d+)\)\.$/, 'تعذّر تحميل مكتبة PROTV (HTTP $1).'],
+        [/^1 channel is not in Jellyfin Live TV yet\. Run the "Refresh Guide" task in the Jellyfin dashboard, then press Refresh\.$/,
+            'قناة واحدة غير مضافة إلى البث المباشر في Jellyfin بعد. شغّل مهمة "تحديث دليل البرامج" ثم اضغط تحديث.'],
+        [/^(\d+) channels are not in Jellyfin Live TV yet\. Run the "Refresh Guide" task in the Jellyfin dashboard, then press Refresh\.$/,
+            '$1 قناة غير مضافة إلى البث المباشر في Jellyfin بعد. شغّل مهمة "تحديث دليل البرامج" ثم اضغط تحديث.'],
+        [/^"(.+)" is not in the PROTV VOD library yet\. Open the PROTV dashboard page, press "Sync now" and come back once it has run\.$/,
+            '"$1" غير متاح في مكتبة PROTV بعد. افتح لوحة تحكم PROTV، اضغط "مزامنة الآن" ثم أعد المحاولة.'],
+        [/^"(.+)" could not be started \(HTTP (\d+)\)\.(.*)$/, function (match) {
+            var tail = match[3].trim();
+            return '"' + match[1] + '" تعذّر تشغيله (HTTP ' + match[2] + ').' + (tail ? ' ' + translate(tail) : '');
+        }]
+    ];
+
+    function isArabic() {
+        return language === 'ar';
+    }
+
+    // Resolves "auto" against the browser: an Arabic browser gets Arabic.
+    function resolveLanguage(value) {
+        var wanted = String(value || 'auto').toLowerCase();
+        if (wanted === 'ar' || wanted === 'en') {
+            return wanted;
+        }
+
+        var browser = String((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();
+        return browser.indexOf('ar') === 0 ? 'ar' : 'en';
+    }
+
+    function translate(text) {
+        var value = String(text == null ? '' : text);
+        var key = value.trim();
+        if (!isArabic() || !key) {
+            return value;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(AR, key)) {
+            return value.replace(key, AR[key]);
+        }
+
+        for (var i = 0; i < AR_PATTERNS.length; i++) {
+            var match = AR_PATTERNS[i][0].exec(key);
+            if (!match) {
+                continue;
+            }
+
+            var replacement = AR_PATTERNS[i][1];
+            if (typeof replacement === 'function') {
+                return replacement(match);
+            }
+
+            var swapped = replacement.replace(/\$(\d)/g, function (whole, index) {
+                return match[Number(index)];
+            });
+            return value.replace(key, swapped);
+        }
+
+        return value;
+    }
+
+    function localize(root) {
+        if (!root) {
+            return;
+        }
+
+        var arabic = isArabic();
+        root.setAttribute('dir', arabic ? 'rtl' : 'ltr');
+        root.setAttribute('lang', arabic ? 'ar' : 'en');
+        if (arabic) {
+            translateElement(root);
+        }
+    }
+
+    function isValue(node) {
+        if (!node.classList) {
+            return false;
+        }
+
+        for (var i = 0; i < VALUES.length; i++) {
+            if (node.classList.contains(VALUES[i])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    function translateElement(node) {
+        var children = node.childNodes;
+        for (var i = 0; i < children.length; i++) {
+            var child = children[i];
+            if (child.nodeType === 3) {
+                var text = String(child.nodeValue || '');
+                var trimmed = text.trim();
+                if (trimmed) {
+                    var swapped = translate(trimmed);
+                    if (swapped !== trimmed) {
+                        child.nodeValue = text.replace(trimmed, swapped);
+                    }
+                }
+
+                continue;
+            }
+
+            if (child.nodeType !== 1) {
+                continue;
+            }
+
+            var tag = child.tagName;
+            if (tag === 'SCRIPT' || tag === 'STYLE') {
+                continue;
+            }
+
+            if (isValue(child)) {
+                continue;
+            }
+
+            for (var a = 0; a < WATCHED.length; a++) {
+                var attribute = WATCHED[a];
+                var value = child.getAttribute(attribute);
+                if (value) {
+                    child.setAttribute(attribute, translate(value));
+                }
+            }
+
+            translateElement(child);
+        }
+    }
+
+    // Keeps the translation in step with the tab's own re-renders. A pass writes into the same
+    // nodes and attributes, which would retrigger the observer, so it is detached while translating.
+    // Attributes are watched by name because the tab sets placeholders and titles straight after
+    // a re-render; without that they would flip back to English.
+    var WATCH_OPTIONS = {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: WATCHED
+    };
+
+    function watchLanguage(host) {
+        if (!host) {
+            return;
+        }
+
+        localize(host);
+        if (languageObserver || !window.MutationObserver) {
+            return;
+        }
+
+        languageObserver = new window.MutationObserver(function () {
+            languageObserver.disconnect();
+            localize(host);
+            if (languageObserver) {
+                languageObserver.observe(host, WATCH_OPTIONS);
+            }
+        });
+        languageObserver.observe(host, WATCH_OPTIONS);
+    }
+
     function ensureStyles() {
         if (document.getElementById(STYLE_ID)) {
             return;
@@ -135,6 +421,23 @@
     function url(path, query) {
         var full = window.ApiClient && ApiClient.getUrl ? ApiClient.getUrl(path) : '/' + path;
         return query ? full + query : full;
+    }
+
+    // The parental unlock is a short-lived HMAC token bound to this Jellyfin user, not a Jellyfin
+    // token. Send it as a header rather than a query parameter so it cannot end up in reverse-proxy
+    // access logs, browser history or Referer headers. ApiClient.ajax supports headers; plain
+    // getJSON does not, so use getJSON only when there is no unlock token.
+    function getJson(full) {
+        if (!state.unlockToken || !ApiClient.ajax) {
+            return ApiClient.getJSON(full);
+        }
+
+        return ApiClient.ajax({
+            type: 'GET',
+            url: full,
+            dataType: 'json',
+            headers: { 'X-PROTV-Unlock': state.unlockToken }
+        });
     }
 
     function initials(name) {
@@ -153,19 +456,134 @@
         state.error = null;
         renderGrid();
 
-        ApiClient.getJSON(url('PROTV/Channels', refresh ? '?refresh=true' : '')).then(function (data) {
+        getJson(url('PROTV/Channels', refresh ? '?refresh=true' : '')).then(function (data) {
             state.loading = false;
             state.title = (data && data.title) || 'PROTV';
             state.channels = (data && data.channels) || [];
             state.total = (data && data.total) || state.channels.length;
+            state.groups = (data && data.groups) || [];
+
+            // The dashboard setting decides the language; "auto" already resolved to the browser.
+            var next = resolveLanguage(data && data.language);
+            if (next !== language) {
+                language = next;
+                localize(document.getElementById(ROOT_ID));
+            }
+
             renderHeader();
             renderGrid();
+            loadNow();
         }, function (error) {
             state.loading = false;
             state.error = describe(error);
             renderHeader();
             renderGrid();
         });
+    }
+
+    // ---- what is on now ----------------------------------------------------------
+    // Asked for after the channel list, so the grid and the channel search appear at once. The
+    // answer fills the "On now" row and the now / next line on every card. It is a nice-to-have:
+    // without it the tab still lists and plays every channel.
+    function loadNow() {
+        state.now = {};
+        return getJson(url('PROTV/Channels/Now')).then(function (data) {
+            var map = {};
+            ((data && data.channels) || []).forEach(function (entry) {
+                map[entry.channelId] = entry;
+            });
+            state.now = map;
+            renderGrid();
+        }, function () {
+            // Leave the row and the now / next lines out.
+        });
+    }
+
+    function nowFor(channel) {
+        return channel ? state.now[channel.id] : null;
+    }
+
+    // One chip per channel that is airing something right now, the most recently started first, so
+    // the row reads like a guide strip. Capped so a large lineup does not build hundreds of nodes.
+    function nowRow() {
+        var entries = visibleChannels().map(function (channel) {
+            var entry = nowFor(channel);
+            return entry && entry.now ? { channel: channel, entry: entry } : null;
+        }).filter(function (item) {
+            return item !== null;
+        });
+        if (!entries.length) {
+            return null;
+        }
+
+        entries.sort(function (left, right) {
+            return startOf(right.entry.now) - startOf(left.entry.now);
+        });
+
+        var row = document.createElement('div');
+        row.className = 'protvTabNowRow';
+        entries.slice(0, 24).forEach(function (item) {
+            row.appendChild(nowCard(item.channel, item.entry));
+        });
+        return row;
+    }
+
+    function nowCard(channel, entry) {
+        var chip = document.createElement('div');
+        chip.className = 'protvTabNowCard';
+        chip.setAttribute('role', 'button');
+        chip.setAttribute('tabindex', '0');
+        chip.setAttribute('title', 'Play ' + channel.name);
+
+        var name = document.createElement('div');
+        name.className = 'protvTabNowChannel';
+        name.textContent = channel.name || '';
+
+        var title = document.createElement('div');
+        title.className = 'protvTabNowTitle';
+        title.textContent = entry.now.title || '';
+
+        var bar = document.createElement('div');
+        bar.className = 'protvTabProgress';
+        var fill = document.createElement('div');
+        fill.className = 'protvTabProgressFill';
+        fill.style.width = progressWidth(entry.now) + '%';
+        bar.appendChild(fill);
+
+        var next = document.createElement('div');
+        next.className = 'protvTabNowNext';
+        next.textContent = entry.next && entry.next.title ? 'Next: ' + entry.next.title : '';
+
+        chip.appendChild(name);
+        chip.appendChild(title);
+        chip.appendChild(bar);
+        chip.appendChild(next);
+        chip.addEventListener('click', function () {
+            playChannel(channel);
+        });
+        chip.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+                event.preventDefault();
+                playChannel(channel);
+            }
+        });
+
+        return chip;
+    }
+
+    function startOf(programme) {
+        return programme && programme.startsUtc ? new Date(programme.startsUtc).getTime() : 0;
+    }
+
+    function progressWidth(programme) {
+        var start = startOf(programme);
+        var end = programme && programme.endsUtc ? new Date(programme.endsUtc).getTime() : 0;
+        if (!start || end <= start) {
+            return 0;
+        }
+
+        var ratio = (Date.now() - start) / (end - start);
+        return Math.round(Math.max(0, Math.min(1, ratio)) * 100);
     }
 
     function describe(error) {
@@ -189,8 +607,70 @@
 
         return state.channels.filter(function (channel) {
             return String(channel.name || '').toLowerCase().indexOf(filter) >= 0
-                || String(channel.number || '') === filter;
+                || String(channel.number || '') === filter
+                || String(groupNameFor(channel) || '').toLowerCase().indexOf(filter) >= 0;
         });
+    }
+
+    function groupNameFor(channel) {
+        var id = String((channel && channel.groupId) || '');
+        if (!id) {
+            return '';
+        }
+
+        for (var index = 0; index < state.groups.length; index++) {
+            if (String(state.groups[index].id) === id) {
+                return state.groups[index].name || '';
+            }
+        }
+
+        return '';
+    }
+
+    // Favourites first, then the dashboard groups in order, then the channels that are in neither.
+    // A channel appears once: a favourite that is also in a group stays in Favourites only.
+    function channelSections(channels) {
+        var hasFavourites = false;
+        var index;
+        for (index = 0; index < channels.length; index++) {
+            if (channels[index].favorite === true) {
+                hasFavourites = true;
+                break;
+            }
+        }
+
+        if (!hasFavourites && !state.groups.length) {
+            return [{ name: '', group: false, channels: channels }];
+        }
+
+        var sections = [];
+        var shown = {};
+        var favourites = channels.filter(function (channel) {
+            return channel.favorite === true;
+        });
+        if (favourites.length) {
+            sections.push({ name: 'Favourites', group: false, channels: favourites });
+            favourites.forEach(function (channel) { shown[channel.id] = true; });
+        }
+
+        state.groups.forEach(function (group) {
+            var items = channels.filter(function (channel) {
+                return !shown[channel.id] && String(channel.groupId || '') === String(group.id);
+            });
+            if (!items.length) {
+                return;
+            }
+
+            sections.push({ name: group.name || '', group: true, channels: items });
+            items.forEach(function (channel) { shown[channel.id] = true; });
+        });
+
+        var other = channels.filter(function (channel) { return !shown[channel.id]; });
+        if (other.length) {
+            sections.push({ name: 'Other channels', group: false, channels: other });
+        }
+
+        return sections;
     }
 
     // ---- VOD: films and series --------------------------------------------
@@ -226,7 +706,7 @@
             query += '&categoryId=' + encodeURIComponent(state.vodCategoryId);
         }
 
-        ApiClient.getJSON(url('PROTV/Vod/' + vodSection(), query)).then(function (data) {
+        getJson(url('PROTV/Vod/' + vodSection(), query)).then(function (data) {
             var items = (data && data.items) || [];
             state.vodLoading = false;
             state.vodItems = append ? state.vodItems.concat(items) : items;
@@ -247,7 +727,7 @@
         state.vodLoading = true;
         state.vodError = null;
         renderGrid();
-        ApiClient.getJSON(url('PROTV/Vod/SeriesDetail', '?seriesId=' + encodeURIComponent(series.id)))
+        getJson(url('PROTV/Vod/SeriesDetail', '?seriesId=' + encodeURIComponent(series.id)))
             .then(function (data) {
                 state.vodLoading = false;
                 state.vodSeries = data;
@@ -286,8 +766,19 @@
         state.vodError = null;
         state.vodPage = 1;
         var search = document.querySelector('#' + ROOT_ID + ' .protvTabSearch');
-        if (search && view !== 'channels') {
-            search.value = '';
+        if (search) {
+            search.value = view === 'channels' ? state.filter : '';
+        }
+
+        if (view === 'all') {
+            state.allQuery = '';
+            state.allLoading = false;
+            state.allError = null;
+            state.allMovies = [];
+            state.allSeries = [];
+            renderHeader();
+            renderGrid();
+            return;
         }
 
         renderHeader();
@@ -397,6 +888,15 @@
 
         var open = function () {
             if (isSeries) {
+                if (state.view === 'all') {
+                    state.view = 'series';
+                    state.vodFilter = '';
+                    state.vodItems = [];
+                    state.vodSeries = null;
+                    state.vodError = null;
+                    renderHeader();
+                }
+
                 loadSeriesDetail(item);
             } else {
                 playVod(item);
@@ -604,7 +1104,48 @@
         return false;
     }
 
+    function unlockChannel(channel) {
+        var pin = window.prompt(translate('Enter the parental PIN to watch ' + channel.name + '.'));
+        if (pin === null || !pin) {
+            return;
+        }
+
+        ApiClient.ajax({
+            type: 'POST',
+            url: url('PROTV/Parental/Unlock'),
+            data: JSON.stringify({ Pin: pin }),
+            contentType: 'application/json',
+            dataType: 'json'
+        }).then(function (result) {
+            if (!result || !result.token) {
+                throw new Error('no-token');
+            }
+
+            state.unlockToken = result.token;
+            try {
+                window.sessionStorage.setItem('protvParentalUnlock', result.token);
+            } catch (ignored) {
+                // Private browsing may refuse storage; the unlock still works for this page.
+            }
+
+            state.channels.forEach(function (item) {
+                item.locked = false;
+            });
+
+            renderGrid();
+            setMessage('Unlocked for this session.', 'notice');
+            playChannel(channel);
+        }, function () {
+            setMessage('That PIN was not accepted. Try again.', 'bad');
+        });
+    }
+
     function playChannel(channel) {
+        if (channel.locked === true) {
+            unlockChannel(channel);
+            return;
+        }
+
         if (state.playing === channel.number) {
             return;
         }
@@ -780,15 +1321,28 @@
 
     function card(channel) {
         var item = document.createElement('div');
-        item.className = 'protvTabCard';
+        // The last health check may have found no stream behind this channel; the card says so
+        // instead of letting the tap end in a spinner. It stays clickable because the answer can be
+        // out of date, and a channel that came back is fixed by the next check.
+        var offline = channel.health === 'offline';
+        var locked = channel.locked === true;
+        item.className = 'protvTabCard'
+            + (offline ? ' protvTabCardOffline' : '')
+            + (locked ? ' protvTabCardLocked' : '');
         item.setAttribute('role', 'button');
         item.setAttribute('tabindex', '0');
         item.setAttribute('data-number', channel.number || '');
         item.setAttribute('data-live', channel.inLiveTv === false ? '0' : '1');
+        item.setAttribute('data-health', channel.health || 'unknown');
+        item.setAttribute('data-locked', locked ? '1' : '0');
         item.setAttribute('data-playing', state.playing === channel.number ? '1' : '0');
-        item.setAttribute('title', channel.inLiveTv === false
-            ? channel.name + ' is not in Live TV yet'
-            : 'Play ' + channel.name);
+        item.setAttribute('title', locked
+            ? 'Enter the parental PIN to watch ' + channel.name
+            : channel.inLiveTv === false
+                ? channel.name + ' is not in Live TV yet'
+                : offline
+                    ? channel.name + ' has no stream right now'
+                    : 'Play ' + channel.name);
 
         var logo = document.createElement('div');
         logo.className = 'protvTabLogo';
@@ -820,11 +1374,41 @@
         item.appendChild(name);
         item.appendChild(number);
 
+        // What is on now (and what follows) from the "On now" answer, when it has arrived.
+        var airing = nowFor(channel);
+        if (airing && airing.now && airing.now.title) {
+            var nowLine = document.createElement('div');
+            nowLine.className = 'protvTabNowTitle';
+            nowLine.textContent = airing.now.title;
+            item.appendChild(nowLine);
+
+            if (airing.next && airing.next.title) {
+                var nextLine = document.createElement('div');
+                nextLine.className = 'protvTabNowNext';
+                nextLine.textContent = 'Next: ' + airing.next.title;
+                item.appendChild(nextLine);
+            }
+        }
+
         if (state.playing === channel.number) {
             var badge = document.createElement('span');
             badge.className = 'protvTabBadge';
             badge.textContent = '\u25B6'; // play glyph while the channel is starting
             item.appendChild(badge);
+        }
+
+        if (locked) {
+            var lock = document.createElement('span');
+            lock.className = 'protvTabLock';
+            lock.textContent = '\uD83D\uDD12'; // parental lock
+            item.appendChild(lock);
+        }
+
+        if (offline) {
+            var mark = document.createElement('span');
+            mark.className = 'protvTabOffline';
+            mark.textContent = '\u26A0'; // no stream the last time it was checked
+            item.appendChild(mark);
         }
 
         // Second action: the channel page, for anyone who wants the guide entry or a different
@@ -844,12 +1428,20 @@
         }
 
         item.addEventListener('click', function () {
-            playChannel(channel);
+            if (locked) {
+                unlockChannel(channel);
+            } else {
+                playChannel(channel);
+            }
         });
         item.addEventListener('keydown', function (event) {
             if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
                 event.preventDefault();
-                playChannel(channel);
+                if (locked) {
+                    unlockChannel(channel);
+                } else {
+                    playChannel(channel);
+                }
             }
         });
 
@@ -889,6 +1481,22 @@
                 return;
             }
 
+            if (state.view === 'all') {
+                if (vodSearchTimer) {
+                    window.clearTimeout(vodSearchTimer);
+                }
+
+                if (!search.value.trim()) {
+                    loadAll('');
+                    return;
+                }
+
+                vodSearchTimer = window.setTimeout(function () {
+                    loadAll(search.value);
+                }, 450);
+                return;
+            }
+
             state.vodFilter = search.value;
             if (vodSearchTimer) {
                 window.clearTimeout(vodSearchTimer);
@@ -899,20 +1507,27 @@
             }, 450);
         });
         search.addEventListener('keydown', function (event) {
-            if (event.key === 'Enter' && state.view !== 'channels') {
-                event.preventDefault();
-                if (vodSearchTimer) {
-                    window.clearTimeout(vodSearchTimer);
-                }
+            if (event.key !== 'Enter' || state.view === 'channels') {
+                return;
+            }
 
+            event.preventDefault();
+            if (vodSearchTimer) {
+                window.clearTimeout(vodSearchTimer);
+            }
+
+            if (state.view === 'all') {
+                loadAll(search.value);
+            } else {
                 loadVod(1);
             }
         });
 
-        // Channels / Films / Series. The two VOD views browse the PROTV catalogue.
+        // Channels / Films / Series / All. The VOD views browse the PROTV catalogue; All runs one
+        // search across live channels, films and series.
         var views = document.createElement('div');
         views.className = 'protvTabViews';
-        [['channels', 'Channels'], ['movies', 'Films'], ['series', 'Series']].forEach(function (entry) {
+        [['channels', 'Channels'], ['movies', 'Films'], ['series', 'Series'], ['all', 'All']].forEach(function (entry) {
             var view = document.createElement('button');
             view.className = 'protvTabView';
             view.type = 'button';
@@ -931,6 +1546,8 @@
         button.addEventListener('click', function () {
             if (state.view === 'channels') {
                 load(true);
+            } else if (state.view === 'all') {
+                loadAll(state.allQuery);
             } else {
                 loadVod(1);
             }
@@ -990,7 +1607,11 @@
             title.textContent = state.title;
         }
 
-        var busy = state.view === 'channels' ? state.loading : state.vodLoading;
+        var busy = state.view === 'channels'
+            ? state.loading
+            : state.view === 'all'
+                ? state.allLoading
+                : state.vodLoading;
         var views = host.querySelectorAll('.protvTabView');
         for (var index = 0; index < views.length; index++) {
             views[index].setAttribute(
@@ -1001,7 +1622,7 @@
         if (button) {
             button.disabled = busy;
             button.textContent = busy
-                ? (state.view === 'channels' ? 'Refreshing...' : 'Loading...')
+                ? (state.view === 'channels' ? 'Refreshing...' : state.view === 'all' ? 'Searching...' : 'Loading...')
                 : 'Refresh';
         }
 
@@ -1009,6 +1630,9 @@
             if (state.view === 'channels') {
                 search.placeholder = 'Filter channels';
                 search.style.display = state.channels.length ? '' : 'none';
+            } else if (state.view === 'all') {
+                search.placeholder = 'Search channels, films and series';
+                search.style.display = '';
             } else {
                 search.placeholder = state.view === 'series' ? 'Search series' : 'Search films';
                 search.style.display = '';
@@ -1016,11 +1640,15 @@
         }
 
         if (hint) {
-            hint.textContent = state.view === 'channels'
-                ? 'Pick a channel to play it here (the same Live TV channel the rest of Jellyfin '
-                    + 'plays). Use \u2139 on a channel to open its Jellyfin page instead.'
-                : 'Films and episodes play here once they are in the PROTV VOD library (see the '
+            if (state.view === 'channels') {
+                hint.textContent = 'Pick a channel to play it here (the same Live TV channel the rest of '
+                    + 'Jellyfin plays). Use \u2139 on a channel to open its Jellyfin page instead.';
+            } else if (state.view === 'all') {
+                hint.textContent = 'Type to search every live channel, film and series in PROTV.';
+            } else {
+                hint.textContent = 'Films and episodes play here once they are in the PROTV VOD library (see the '
                     + 'PROTV dashboard page). Series open their season list.';
+            }
         }
 
         if (!count) {
@@ -1040,6 +1668,22 @@
             return;
         }
 
+        if (state.view === 'all') {
+            if (!state.allQuery.trim() || state.allLoading || state.allError) {
+                count.textContent = '';
+                return;
+            }
+
+            var filter = state.allQuery.trim().toLowerCase();
+            var found = state.channels.filter(function (channel) {
+                return String(channel.name || '').toLowerCase().indexOf(filter) >= 0
+                    || String(channel.number || '') === filter;
+            }).length;
+            found += state.allMovies.length + state.allSeries.length;
+            count.textContent = found + (found === 1 ? ' result' : ' results');
+            return;
+        }
+
         if (state.vodSeries || !state.vodItems.length) {
             count.textContent = '';
             return;
@@ -1051,10 +1695,124 @@
             : state.vodItems.length + ' of ' + state.vodTotal + ' ' + noun;
     }
 
+    function loadAll(query) {
+        state.allQuery = String(query || '');
+        state.allError = null;
+        var request = (state.allRequest || 0) + 1;
+        state.allRequest = request;
+
+        if (!state.allQuery.trim()) {
+            state.allLoading = false;
+            state.allMovies = [];
+            state.allSeries = [];
+            renderHeader();
+            renderGrid();
+            return;
+        }
+
+        state.allLoading = true;
+        renderHeader();
+        renderGrid();
+
+        var search = '?page=1&pageSize=12&search=' + encodeURIComponent(state.allQuery.trim());
+        Promise.all([
+            getJson(url('PROTV/Vod/Movies', search)),
+            getJson(url('PROTV/Vod/Series', search))
+        ]).then(function (results) {
+            if (state.allRequest !== request) {
+                return;
+            }
+
+            state.allLoading = false;
+            state.allMovies = ((results[0] && results[0].items) || []).slice(0, 12);
+            state.allSeries = ((results[1] && results[1].items) || []).slice(0, 12);
+            renderHeader();
+            renderGrid();
+        }, function (error) {
+            if (state.allRequest !== request) {
+                return;
+            }
+
+            state.allLoading = false;
+            state.allError = describeVod(error);
+            renderHeader();
+            renderGrid();
+        });
+    }
+
+    function renderAllBody() {
+        var grid = document.getElementById(GRID_ID);
+        var message = document.getElementById(MESSAGE_ID);
+        if (!grid || !message) {
+            return;
+        }
+
+        grid.className = 'protvTabGrid';
+        grid.textContent = '';
+
+        if (!state.allQuery.trim()) {
+            message.className = 'protvTabMessage';
+            message.textContent = 'Search channels, films and series.';
+            return;
+        }
+
+        if (state.allError) {
+            setMessage(state.allError, 'bad');
+            return;
+        }
+
+        if (state.allLoading) {
+            message.className = 'protvTabMessage';
+            message.textContent = 'Searching...';
+            return;
+        }
+
+        var filter = state.allQuery.trim().toLowerCase();
+        var channels = state.channels.filter(function (channel) {
+            return String(channel.name || '').toLowerCase().indexOf(filter) >= 0
+                || String(channel.number || '') === filter;
+        }).slice(0, 24);
+
+        if (!channels.length && !state.allMovies.length && !state.allSeries.length) {
+            message.className = 'protvTabMessage';
+            message.textContent = 'No results for "' + state.allQuery.trim() + '".';
+            return;
+        }
+
+        renderMessage();
+        if (channels.length) {
+            var channelHeading = document.createElement('div');
+            channelHeading.className = 'protvTabSectionTitle';
+            channelHeading.textContent = 'Channels';
+            grid.appendChild(channelHeading);
+            channels.forEach(function (channel) {
+                grid.appendChild(card(channel));
+            });
+        }
+
+        if (state.allMovies.length || state.allSeries.length) {
+            var vodHeading = document.createElement('div');
+            vodHeading.className = 'protvTabSectionTitle';
+            vodHeading.textContent = 'Films and series';
+            grid.appendChild(vodHeading);
+            state.allMovies.forEach(function (item) {
+                grid.appendChild(vodCard(item));
+            });
+            state.allSeries.forEach(function (item) {
+                grid.appendChild(vodCard(item));
+            });
+        }
+    }
+
     function renderGrid() {
         var grid = document.getElementById(GRID_ID);
         var message = document.getElementById(MESSAGE_ID);
         if (!grid || !message) {
+            return;
+        }
+
+        if (state.view === 'all') {
+            renderAllBody();
             return;
         }
 
@@ -1066,7 +1824,7 @@
         grid.className = 'protvTabGrid';
         grid.textContent = '';
 
-        if (state.error) {
+        if (state.error && !state.channels.length) {
             setMessage(state.error, 'bad');
             return;
         }
@@ -1091,19 +1849,35 @@
             return;
         }
 
-        var missing = 0;
-        var fragment = document.createDocumentFragment();
-        for (var index = 0; index < visible.length; index++) {
-            if (visible[index].inLiveTv === false) {
-                missing++;
-            }
-
-            fragment.appendChild(card(visible[index]));
+        var row = nowRow();
+        if (row) {
+            grid.appendChild(row);
         }
 
-        grid.appendChild(fragment);
+        var missing = 0;
+        var sections = channelSections(visible);
+        sections.forEach(function (section) {
+            if (section.name) {
+                var heading = document.createElement('div');
+                heading.className = 'protvTabSectionTitle' + (section.group ? ' protvTabGroupName' : '');
+                heading.textContent = section.name;
+                grid.appendChild(heading);
+            }
 
-        if (missing) {
+            section.channels.forEach(function (channel) {
+                if (channel.inLiveTv === false) {
+                    missing++;
+                }
+
+                grid.appendChild(card(channel));
+            });
+        });
+
+        if (state.error) {
+            // A refresh failed but the last channel list is still usable: keep it on screen with
+            // a short banner instead of replacing the whole tab with an error.
+            setMessage('PROTV is unavailable; showing the last channel list.', 'bad');
+        } else if (missing) {
             setMessage(missing + (missing === 1 ? ' channel is' : ' channels are')
                 + ' not in Jellyfin Live TV yet. Run the "Refresh Guide" task in the Jellyfin '
                 + 'dashboard, then press Refresh.', 'bad');
@@ -1131,6 +1905,8 @@
 
         renderHeader();
         renderGrid();
+        // Swaps the strings for Arabic when it applies and keeps doing so after every re-render.
+        watchLanguage(host);
         if (!state.requested) {
             load(false);
         }

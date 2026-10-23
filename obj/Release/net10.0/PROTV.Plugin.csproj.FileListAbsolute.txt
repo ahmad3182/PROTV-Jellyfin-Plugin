@@ -98,3 +98,15 @@ D:\PROTV Plugin Project\PROTV Plugin 0.7\obj\release\net10.0\PROTV.Plugin.dll
 D:\PROTV Plugin Project\PROTV Plugin 0.7\obj\release\net10.0\refint\PROTV.Plugin.dll
 D:\PROTV Plugin Project\PROTV Plugin 0.7\obj\release\net10.0\PROTV.Plugin.pdb
 D:\PROTV Plugin Project\PROTV Plugin 0.7\obj\release\net10.0\ref\PROTV.Plugin.dll
+C:\Users\ahmad\Documents\Default Project\PROTV Plugin 0.8\bin\Release\net10.0\PROTV.Plugin.deps.json
+C:\Users\ahmad\Documents\Default Project\PROTV Plugin 0.8\bin\Release\net10.0\PROTV.Plugin.dll
+C:\Users\ahmad\Documents\Default Project\PROTV Plugin 0.8\bin\Release\net10.0\PROTV.Plugin.pdb
+C:\Users\ahmad\Documents\Default Project\PROTV Plugin 0.8\obj\Release\net10.0\PROTV.Plugin.csproj.AssemblyReference.cache
+C:\Users\ahmad\Documents\Default Project\PROTV Plugin 0.8\obj\Release\net10.0\PROTV.Plugin.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\ahmad\Documents\Default Project\PROTV Plugin 0.8\obj\Release\net10.0\PROTV.Plugin.csproj.CoreCompileInputs.cache
+C:\Users\ahmad\Documents\Default Project\PROTV Plugin 0.8\obj\Release\net10.0\PROTV.Plugin.dll
+C:\Users\ahmad\Documents\Default Project\PROTV Plugin 0.8\obj\Release\net10.0\refint\PROTV.Plugin.dll
+C:\Users\ahmad\Documents\Default Project\PROTV Plugin 0.8\obj\Release\net10.0\PROTV.Plugin.pdb
+C:\Users\ahmad\Documents\Default Project\PROTV Plugin 0.8\obj\Release\net10.0\ref\PROTV.Plugin.dll
+C:\Users\ahmad\Documents\Default Project\PROTV Plugin 0.8\obj\Release\net10.0\PROTV.Plugin.AssemblyInfoInputs.cache
+C:\Users\ahmad\Documents\Default Project\PROTV Plugin 0.8\obj\Release\net10.0\PROTV.Plugin.AssemblyInfo.cs

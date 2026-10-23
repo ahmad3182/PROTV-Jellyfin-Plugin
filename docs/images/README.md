@@ -1,15 +1,11 @@
 # Screenshots
 
-Put the screenshots for the main README here, then remove the comment markers around the image
-block in `README.md`.
+The main README uses these sanitized screenshots:
 
-Suggested files:
-
-| File | What to capture |
+| File | What it shows |
 |---|---|
-| `dashboard.png` | The PROTV dashboard page (Account, Service, Channels) |
-| `home-tab.png` | The PROTV tab on the Jellyfin home page |
-| `vod-library.png` | The PROTV VOD libraries in Jellyfin |
-| `diagnostics.png` | The Diagnostics section with a report |
+| `dashboard.png` | The PROTV dashboard with demo account values, service settings and the channel table |
+| `home-tab.png` | The PROTV tab on the Jellyfin home page, with demo channels, favourites, groups and on-now data |
 
-Before you upload a screenshot, check that no username, password, MAC address or full IP address is visible.
+They were captured from the UI test harness with demo data. Before replacing them with screenshots
+from a real server, check that no username, password, MAC address or full IP address is visible.

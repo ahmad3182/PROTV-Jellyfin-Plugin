@@ -44,6 +44,20 @@ public sealed class ProTvVodSyncState
 
     public string? LastError { get; set; }
 
+    // How far the run in flight has got. The counters above are only replaced once a complete run
+    // has seen the whole catalogue, so the dashboard reads these while a sync is running.
+    public int RunMovies { get; set; }
+
+    public int RunSeries { get; set; }
+
+    public int RunEpisodes { get; set; }
+
+    // When the run in flight started (or when the last run started, once it is done).
+    public DateTime? SyncStartedUtc { get; set; }
+
+    // running | completed | cancelled | failed. Empty for a state written by an older build.
+    public string LastRunStatus { get; set; } = string.Empty;
+
     // The stream base URL the .strm files were written with. When it changes (a new server
     // address), the next sync rewrites every file.
     public string? StreamBaseUrl { get; set; }
@@ -100,6 +114,12 @@ internal static class ProTvVodLibrary
     private const int ReplaceAttempts = 8;
 
     private static readonly TimeSpan ReplaceRetryDelay = TimeSpan.FromMilliseconds(150);
+
+    // A whole write (temporary file + replace) is attempted this many times before the item is
+    // left for the next sync. A fresh temporary name is used for every attempt.
+    private const int WriteAttempts = 3;
+
+    private static readonly TimeSpan WriteRetryDelay = TimeSpan.FromMilliseconds(200);
 
     // How long one wait for a playback lasts before the sync carries on regardless. The next item
     // that has something to download waits again, so a real playback keeps the sync out of the way
@@ -288,6 +308,25 @@ internal static class ProTvVodLibrary
         try
         {
             var configuration = Plugin.Instance?.Configuration;
+            var moviesEnabled = configuration?.VodMoviesEnabled ?? true;
+            var seriesEnabled = configuration?.VodSeriesEnabled ?? true;
+
+            // The progress counters are reset here, under the same lock the item work counts into,
+            // so a status request can never read a half-updated run. A kind that is switched off
+            // keeps its stored count so the dashboard does not show an empty library mid-run.
+            lock (StateGate)
+            {
+                state.RunMovies = moviesEnabled ? 0 : state.Movies;
+                state.RunSeries = seriesEnabled ? 0 : state.Series;
+                state.RunEpisodes = seriesEnabled ? 0 : state.Episodes;
+                state.SyncStartedUtc = DateTime.UtcNow;
+                state.LastRunStatus = "running";
+            }
+
+            // Record that a run started before the first item is written: if the server stops hard,
+            // the next start can show the run as interrupted instead of looking like a fresh install.
+            SaveState();
+
             var client = ProTvVodData.CreateClient(configuration);
             if (client is null)
             {
@@ -334,8 +373,8 @@ internal static class ProTvVodLibrary
 
             _logger?.LogInformation(
                 "PROTV VOD sync started. Movies={Movies}, Series={Series}, Subtitles={Subtitles}, Library={LibraryPath}, StreamAddress={StreamBaseUrl}, Downloaded={Downloaded}, Budget={Budget}.",
-                configuration?.VodMoviesEnabled ?? true,
-                configuration?.VodSeriesEnabled ?? true,
+                moviesEnabled,
+                seriesEnabled,
                 context.DownloadSubtitles,
                 ProTvVodPaths.RootDirectory(dataPath),
                 streamBaseUrl,
@@ -348,9 +387,10 @@ internal static class ProTvVodLibrary
             var previousSeries = state.Series;
 
             var movies = 0;
-            if (configuration?.VodMoviesEnabled ?? true)
+            if (moviesEnabled)
             {
                 movies = await SyncMoviesAsync(context);
+                SaveState();
             }
             else
             {
@@ -359,21 +399,51 @@ internal static class ProTvVodLibrary
 
             var series = 0;
             var episodes = 0;
-            if (configuration?.VodSeriesEnabled ?? true)
+            if (seriesEnabled)
             {
                 (series, episodes) = await SyncSeriesAsync(context);
+                SaveState();
             }
 
-            state.Movies = movies;
-            state.Series = series;
-            state.Episodes = episodes;
-            state.LastSyncUtc = DateTime.UtcNow;
-            state.LastError = null;
-            state.StreamBaseUrl = streamBaseUrl;
-            state.NfoVersion = CurrentNfoVersion;
-            state.LibrariesVersion = CurrentLibrariesVersion;
-            state.StreamTokenVersion = CurrentStreamTokenVersion;
-            state.BudgetReached = context.BudgetReached;
+            // The stored counts are what the next run's sweep guard compares against. They are only
+            // replaced by a listing that was complete and not suspiciously short, so a bad answer
+            // from PROTV cannot lower the bar for the run after it (and let that one sweep the
+            // library). A kind that is switched off keeps its count for the same reason.
+            var moviesListingTrusted = context.MoviesListComplete
+                && (previousMovies <= 0 || (long)movies * 2 >= previousMovies);
+            var seriesListingTrusted = context.SeriesListComplete
+                && (previousSeries <= 0 || (long)series * 2 >= previousSeries);
+            lock (StateGate)
+            {
+                if (moviesEnabled)
+                {
+                    state.RunMovies = movies;
+                    if (moviesListingTrusted)
+                    {
+                        state.Movies = movies;
+                    }
+                }
+
+                if (seriesEnabled)
+                {
+                    state.RunSeries = series;
+                    state.RunEpisodes = episodes;
+                    if (seriesListingTrusted)
+                    {
+                        state.Series = series;
+                        state.Episodes = episodes;
+                    }
+                }
+
+                state.LastSyncUtc = DateTime.UtcNow;
+                state.LastError = null;
+                state.LastRunStatus = "completed";
+                state.StreamBaseUrl = streamBaseUrl;
+                state.NfoVersion = CurrentNfoVersion;
+                state.LibrariesVersion = CurrentLibrariesVersion;
+                state.StreamTokenVersion = CurrentStreamTokenVersion;
+                state.BudgetReached = context.BudgetReached;
+            }
 
             // Only after a complete run: a run that stopped early has not seen the whole catalogue.
             var removed = SweepRemovedTitles(context, configuration, movies, previousMovies, series, previousSeries);
@@ -408,13 +478,23 @@ internal static class ProTvVodLibrary
         }
         catch (OperationCanceledException)
         {
+            lock (StateGate)
+            {
+                state.LastRunStatus = "cancelled";
+            }
+
             _logger?.LogInformation("The PROTV VOD sync was cancelled.");
             SaveState();
             throw;
         }
         catch (Exception exception)
         {
-            state.LastError = exception.Message;
+            lock (StateGate)
+            {
+                state.LastError = exception.Message;
+                state.LastRunStatus = "failed";
+            }
+
             SaveState();
             _logger?.LogError(exception, "The PROTV VOD sync failed.");
             throw;
@@ -443,6 +523,10 @@ internal static class ProTvVodLibrary
                 new ParallelOptions { MaxDegreeOfParallelism = MaxParallelItems, CancellationToken = context.Token },
                 async (movie, _) => await TryItemAsync("film", movie.Id, () => WriteMovieAsync(context, movie)));
             movies += data.Result.Count;
+            lock (StateGate)
+            {
+                State.RunMovies = movies;
+            }
 
             var pages = Math.Max(1, data.PageCount);
             context.Progress?.Report(Math.Min(50d, 50d * page / pages));
@@ -480,7 +564,12 @@ internal static class ProTvVodLibrary
                 {
                     var written = await TryItemAsync("series", series.Id, () => WriteSeriesAsync(context, series));
                     Interlocked.Add(ref episodeCount, written);
-                    Interlocked.Increment(ref seriesCount);
+                    var doneSeries = Interlocked.Increment(ref seriesCount);
+                    lock (StateGate)
+                    {
+                        State.RunSeries = doneSeries;
+                        State.RunEpisodes = Volatile.Read(ref episodeCount);
+                    }
                 });
 
             var pages = Math.Max(1, data.PageCount);
@@ -508,11 +597,35 @@ internal static class ProTvVodLibrary
 
         var strmPath = ProTvVodPaths.MovieStrmFile(context.DataPath, movie);
         await EnsureTextFileAsync(strmPath, StreamUrl(context, ProTvVodKind.Movie, movie.Id), context.ForceStreams, context.Token);
+
+        // The list response carries an empty Categories array; only the detail call fills it. The
+        // same detail response is reused for the subtitles below, so a film with genres to repair
+        // costs one call and not two.
+        var nfoPath = Path.Combine(directory, "movie.nfo");
+        var nfoNeedsWrite = context.Force || context.ForceMetadata || NfoNeedsGenres(nfoPath);
+        ProTvMovie? detail = null;
+        if (nfoNeedsWrite && !HasCategories(movie.Categories))
+        {
+            detail = await TryLoadMovieDetailAsync(context, movie.Id);
+        }
+
+        var categories = HasCategories(movie.Categories) ? movie.Categories : detail?.Categories;
+        // A forced rewrite (new stream address or metadata version) must not drop genres just
+        // because this one detail call failed: carry the genres already in the NFO forward.
+        if (!HasCategories(categories) && (context.Force || context.ForceMetadata))
+        {
+            categories = ExistingGenres(nfoPath);
+        }
+
+        var rewriteNfo = context.Force
+            || context.ForceMetadata
+            || (nfoNeedsWrite && HasCategories(categories));
         await EnsureTextFileAsync(
-            Path.Combine(directory, "movie.nfo"),
-            MovieNfo(movie),
-            context.Force || context.ForceMetadata,
-            context.Token);
+            nfoPath,
+            MovieNfo(movie, categories),
+            rewriteNfo,
+            context.Token,
+            compareContent: false);
 
         if (context.DownloadPosters)
         {
@@ -529,7 +642,9 @@ internal static class ProTvVodLibrary
             context,
             movie.Id,
             strmPath,
-            async token => (await context.Client.GetMovieDetailAsync(movie.Id, token))?.Subtitles);
+            async token => detail is not null
+                ? detail.Subtitles
+                : (await context.Client.GetMovieDetailAsync(movie.Id, token))?.Subtitles);
     }
 
     private static async Task<int> WriteSeriesAsync(SyncContext context, ProTvSeries series)
@@ -539,11 +654,31 @@ internal static class ProTvVodLibrary
         var seriesDirectory = ProTvVodPaths.SeriesRootDirectory(context.DataPath, series);
         Directory.CreateDirectory(seriesDirectory);
 
+        // Like films, a series list carries no categories; the detail call is only made when the
+        // tvshow.nfo is missing, is being rewritten, or still has no genre.
+        var nfoPath = Path.Combine(seriesDirectory, "tvshow.nfo");
+        var nfoNeedsWrite = context.Force || context.ForceMetadata || NfoNeedsGenres(nfoPath);
+        ProTvSeries? detail = null;
+        if (nfoNeedsWrite && !HasCategories(series.Categories))
+        {
+            detail = await TryLoadSeriesDetailAsync(context, series.Id);
+        }
+
+        var categories = HasCategories(series.Categories) ? series.Categories : detail?.Categories;
+        if (!HasCategories(categories) && (context.Force || context.ForceMetadata))
+        {
+            categories = ExistingGenres(nfoPath);
+        }
+
+        var rewriteNfo = context.Force
+            || context.ForceMetadata
+            || (nfoNeedsWrite && HasCategories(categories));
         await EnsureTextFileAsync(
-            Path.Combine(seriesDirectory, "tvshow.nfo"),
-            SeriesNfo(series),
-            context.Force || context.ForceMetadata,
-            context.Token);
+            nfoPath,
+            SeriesNfo(series, categories),
+            rewriteNfo,
+            context.Token,
+            compareContent: false);
         if (context.DownloadPosters)
         {
             await DownloadAsync(
@@ -567,7 +702,8 @@ internal static class ProTvVodLibrary
                 Path.Combine(seasonDirectory, "season.nfo"),
                 SeasonNfo(season, seasonIndex),
                 context.Force || context.ForceMetadata,
-                context.Token);
+                context.Token,
+                compareContent: false);
             if (context.DownloadPosters)
             {
                 await DownloadAsync(
@@ -616,7 +752,8 @@ internal static class ProTvVodLibrary
             Path.ChangeExtension(strmPath, ".nfo"),
             EpisodeNfo(series, seasonIndex, episode),
             context.Force || context.ForceMetadata,
-            context.Token);
+            context.Token,
+            compareContent: false);
 
         context.ItemDone();
         await SyncSubtitlesAsync(
@@ -1084,26 +1221,164 @@ internal static class ProTvVodLibrary
         }
     }
 
-    // Writes only when the file is missing, when the sync decided everything must be rewritten (a
-    // new stream address or a new metadata layout). Content is written to a temporary name and
-    // moved into place, so a library scan never catches a half-written file.
+    // Writes only when the content is missing or different, or when the sync decided everything
+    // must be rewritten (a new stream address or a new metadata layout). Comparing the content
+    // repairs a file whose earlier write failed and also picks up a rotated stream-signing secret,
+    // which used to leave old signed links in place after the token-version stamp was saved.
     private static async Task EnsureTextFileAsync(
         string path,
         string content,
         bool force,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool compareContent = true)
     {
-        if (!force && IsUsableFile(path))
+        if (!force && IsUsableFile(path)
+            && (!compareContent || await FileContentEqualsAsync(path, content, cancellationToken).ConfigureAwait(false)))
         {
             return;
         }
 
-        var temporary = path + ".tmp";
-        await File.WriteAllTextAsync(temporary, content, Utf8NoBom, cancellationToken).ConfigureAwait(false);
-        if (!await TryReplaceAsync(temporary, path, cancellationToken).ConfigureAwait(false))
+        if (!await WriteTextFileAtomicallyAsync(path, content, cancellationToken).ConfigureAwait(false))
         {
             throw new IOException($"Could not write \"{path}\".");
         }
+    }
+
+    internal static async Task<bool> FileContentEqualsAsync(
+        string path,
+        string content,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (!IsUsableFile(path))
+            {
+                return false;
+            }
+
+            var existing = await File.ReadAllTextAsync(path, Encoding.UTF8, cancellationToken)
+                .ConfigureAwait(false);
+            return string.Equals(existing, content, StringComparison.Ordinal);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    // Every write gets its own temporary name, so two writes can never collide on the ".tmp" file
+    // (which is what left the earlier sync with an IOException). A failed attempt cleans its
+    // temporary file up and is retried with a fresh name a moment later.
+    private static async Task<bool> WriteTextFileAtomicallyAsync(
+        string path,
+        string content,
+        CancellationToken cancellationToken)
+        => await WriteFileAtomicallyAsync(
+            path,
+            (temporary, token) => File.WriteAllTextAsync(temporary, content, Utf8NoBom, token),
+            cancellationToken).ConfigureAwait(false);
+
+    private static async Task<bool> WriteBytesFileAtomicallyAsync(
+        string path,
+        byte[] content,
+        CancellationToken cancellationToken)
+        => await WriteFileAtomicallyAsync(
+            path,
+            (temporary, token) => File.WriteAllBytesAsync(temporary, content, token),
+            cancellationToken).ConfigureAwait(false);
+
+    private static async Task<bool> WriteFileAtomicallyAsync(
+        string path,
+        Func<string, CancellationToken, Task> write,
+        CancellationToken cancellationToken)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        for (var attempt = 0; attempt < WriteAttempts; attempt++)
+        {
+            var temporary = TemporaryPath(path);
+            try
+            {
+                await write(temporary, cancellationToken).ConfigureAwait(false);
+                if (await TryReplaceAsync(temporary, path, cancellationToken).ConfigureAwait(false))
+                {
+                    return true;
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                _logger?.LogDebug(exception, "A write of \"{Path}\" failed; retrying.", path);
+            }
+            finally
+            {
+                TryDelete(temporary);
+            }
+
+            if (attempt < WriteAttempts - 1)
+            {
+                await Task.Delay(WriteRetryDelay * (attempt + 1), cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        _logger?.LogWarning(
+            "Could not write \"{Path}\" after {Attempts} attempts; it is left for the next sync.",
+            path,
+            WriteAttempts);
+        return false;
+    }
+
+    private static string TemporaryPath(string path)
+        => path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+
+    // Synchronous twin of the helper above, used for the state file (SaveState runs under the state
+    // lock). It must not count into the files-written marker: a state file is not library content.
+    private static bool WriteTextFileAtomically(string path, string content)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        for (var attempt = 0; attempt < WriteAttempts; attempt++)
+        {
+            var temporary = TemporaryPath(path);
+            try
+            {
+                File.WriteAllText(temporary, content, Utf8NoBom);
+                if (TryReplace(temporary, path, countAsWritten: false))
+                {
+                    return true;
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                _logger?.LogDebug(exception, "A write of \"{Path}\" failed; retrying.", path);
+            }
+            finally
+            {
+                TryDelete(temporary);
+            }
+
+            if (attempt < WriteAttempts - 1)
+            {
+                Thread.Sleep(WriteRetryDelay * (attempt + 1));
+            }
+        }
+
+        _logger?.LogWarning(
+            "Could not write \"{Path}\" after {Attempts} attempts; it is left for the next sync.",
+            path,
+            WriteAttempts);
+        return false;
     }
 
     // Puts a file that was just written next to its final name in place. Jellyfin's own library scan
@@ -1112,20 +1387,56 @@ internal static class ProTvVodLibrary
     private static async Task<bool> TryReplaceAsync(
         string temporary,
         string path,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool countAsWritten = true)
     {
         for (var attempt = 0; attempt < ReplaceAttempts; attempt++)
         {
             try
             {
                 File.Move(temporary, path, overwrite: true);
-                Interlocked.Increment(ref _filesWritten);
+                if (countAsWritten)
+                {
+                    Interlocked.Increment(ref _filesWritten);
+                }
+
                 return true;
             }
             catch (Exception exception) when (attempt < ReplaceAttempts - 1
                 && exception is IOException or UnauthorizedAccessException)
             {
                 await Task.Delay(ReplaceRetryDelay * (attempt + 1), cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogDebug(exception, "Could not write \"{Path}\".", path);
+                TryDelete(temporary);
+                return false;
+            }
+        }
+
+        TryDelete(temporary);
+        return false;
+    }
+
+    private static bool TryReplace(string temporary, string path, bool countAsWritten)
+    {
+        for (var attempt = 0; attempt < ReplaceAttempts; attempt++)
+        {
+            try
+            {
+                File.Move(temporary, path, overwrite: true);
+                if (countAsWritten)
+                {
+                    Interlocked.Increment(ref _filesWritten);
+                }
+
+                return true;
+            }
+            catch (Exception exception) when (attempt < ReplaceAttempts - 1
+                && exception is IOException or UnauthorizedAccessException)
+            {
+                Thread.Sleep(ReplaceRetryDelay * (attempt + 1));
             }
             catch (Exception exception)
             {
@@ -1150,7 +1461,8 @@ internal static class ProTvVodLibrary
         }
         catch (Exception)
         {
-            // A leftover ".tmp" is harmless: the next sync writes over it.
+            // A leftover ".tmp" is harmless: Jellyfin does not read it as media, and the next
+            // write uses a fresh name instead of colliding with it.
         }
     }
 
@@ -1174,12 +1486,12 @@ internal static class ProTvVodLibrary
         var removed = 0;
         try
         {
-            if ((configuration?.VodMoviesEnabled ?? true) && context.MoviesListComplete && IsPlausibleListing(moviesListed, previousMovies))
+            if ((configuration?.VodMoviesEnabled ?? true) && context.MoviesListComplete && IsPlausibleListing(moviesListed, previousMovies, "films"))
             {
                 removed += RemoveUnlisted(ProTvVodPaths.MoviesDirectory(context.DataPath), context.SeenMovieFolders);
             }
 
-            if ((configuration?.VodSeriesEnabled ?? true) && context.SeriesListComplete && IsPlausibleListing(seriesListed, previousSeries))
+            if ((configuration?.VodSeriesEnabled ?? true) && context.SeriesListComplete && IsPlausibleListing(seriesListed, previousSeries, "series"))
             {
                 removed += RemoveUnlisted(ProTvVodPaths.SeriesDirectory(context.DataPath), context.SeenSeriesFolders);
             }
@@ -1197,9 +1509,31 @@ internal static class ProTvVodLibrary
         return removed;
     }
 
-    // Also at least half of what the last complete run listed (or any list when there was none).
-    private static bool IsPlausibleListing(int listed, int previous)
-        => listed > 0 && (previous <= 0 || listed * 2 >= previous);
+    // Only a listing of at least half of what the last complete run saw may drive a sweep. When
+    // that previous count is unknown (0, e.g. after an upgrade or a run that never completed), the
+    // sweep is skipped entirely: an empty or short library is preferable to deleting folders.
+    internal static bool IsPlausibleListing(int listed, int previous, string kind)
+    {
+        if (previous <= 0)
+        {
+            _logger?.LogWarning(
+                "PROTV VOD: the sweep of removed {Kind} was skipped because the previous count is unknown (0). The folders are left alone; the count from this run is stored for the next one.",
+                kind);
+            return false;
+        }
+
+        if (listed <= 0 || (long)listed * 2 < previous)
+        {
+            _logger?.LogWarning(
+                "PROTV VOD: the sweep of removed {Kind} was skipped because PROTV listed {Listed} while the last complete run listed {Previous}. The folders are left alone this run.",
+                kind,
+                listed,
+                previous);
+            return false;
+        }
+
+        return true;
+    }
 
     private static int RemoveUnlisted(string root, ConcurrentDictionary<string, byte> seen)
     {
@@ -1391,13 +1725,17 @@ internal static class ProTvVodLibrary
             }
 
             var replaced = IsUsableFile(path) ? new FileInfo(path).Length : 0;
-            var temporary = path + ".tmp";
-            await using (var file = File.Create(temporary))
+
+            // Buffered first: the temporary file is then written with the same retrying atomic
+            // helper the metadata files use, and a retry never has to ask PROTV for the bytes again.
+            var bytes = await response.Content.ReadAsByteArrayAsync(context.Token).ConfigureAwait(false);
+            if (bytes.Length == 0)
             {
-                await response.Content.CopyToAsync(file, context.Token);
+                RememberFailure(failureKey);
+                return false;
             }
 
-            if (!await TryReplaceAsync(temporary, path, context.Token).ConfigureAwait(false))
+            if (!await WriteBytesFileAtomicallyAsync(path, bytes, context.Token).ConfigureAwait(false))
             {
                 return false;
             }
@@ -1413,7 +1751,7 @@ internal static class ProTvVodLibrary
         catch (Exception exception)
         {
             // A poster or a subtitle is decoration: never let one hold up the catalogue.
-            _logger?.LogDebug(exception, "Could not download a PROTV file from {Host}.", Describe(url));
+            _logger?.LogWarning(exception, "Could not download a PROTV file from {Host}; it is left for the next sync.", Describe(url));
             RememberFailure(failureKey);
             return false;
         }
@@ -1583,7 +1921,117 @@ internal static class ProTvVodLibrary
         }
     }
 
-    private static string MovieNfo(ProTvMovie movie)
+    // The list endpoints send Categories as an empty array; only the detail endpoint fills it. An
+    // item without categories still gets a valid NFO - genres are simply absent and the next run
+    // asks again.
+    private static bool HasCategories(IReadOnlyList<ProTvVodCategory>? categories)
+        => categories is not null
+            && categories.Any(category => !string.IsNullOrWhiteSpace(FirstNonEmpty(category.TitleEn, category.TitleAr)));
+
+    // True when the NFO is missing or was written before genres were known. Existing files are only
+    // touched when they need this one repair, so adding genres does not rewrite the whole library.
+    internal static bool NfoNeedsGenres(string path)
+    {
+        try
+        {
+            if (!IsUsableFile(path))
+            {
+                return true;
+            }
+
+            var text = File.ReadAllText(path, Encoding.UTF8);
+            return text.IndexOf("<genre>", StringComparison.OrdinalIgnoreCase) < 0;
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogDebug(exception, "Could not read \"{Path}\"; its NFO will be written again.", path);
+            return true;
+        }
+    }
+
+    // Genres already in an NFO, used only when a forced rewrite cannot ask PROTV for fresh ones.
+    internal static IReadOnlyList<ProTvVodCategory>? ExistingGenres(string path)
+    {
+        try
+        {
+            if (!IsUsableFile(path))
+            {
+                return null;
+            }
+
+            var genres = XDocument.Load(path)
+                .Descendants("genre")
+                .Select(element => element.Value.Trim())
+                .Where(value => value.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select((value, index) => new ProTvVodCategory { Id = index + 1, TitleEn = value })
+                .ToList();
+            return genres.Count > 0 ? genres : null;
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogDebug(exception, "Could not read the genres of \"{Path}\".", path);
+            return null;
+        }
+    }
+
+    private static async Task<ProTvMovie?> TryLoadMovieDetailAsync(SyncContext context, int movieId)
+    {
+        try
+        {
+            var detail = await context.Client.GetMovieDetailAsync(movieId, context.Token).ConfigureAwait(false);
+            if (detail is null)
+            {
+                _logger?.LogWarning(
+                    "PROTV returned no details for film {ItemId}; its NFO is written or kept without genres and the next sync tries again.",
+                    movieId);
+            }
+
+            return detail;
+        }
+        catch (OperationCanceledException) when (context.Token.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogWarning(
+                exception,
+                "Could not read the PROTV details of film {ItemId}; its NFO is written or kept without genres and the next sync tries again.",
+                movieId);
+            return null;
+        }
+    }
+
+    private static async Task<ProTvSeries?> TryLoadSeriesDetailAsync(SyncContext context, int seriesId)
+    {
+        try
+        {
+            var detail = await context.Client.GetSeriesDetailAsync(seriesId, context.Token).ConfigureAwait(false);
+            if (detail is null)
+            {
+                _logger?.LogWarning(
+                    "PROTV returned no details for series {ItemId}; its NFO is written or kept without genres and the next sync tries again.",
+                    seriesId);
+            }
+
+            return detail;
+        }
+        catch (OperationCanceledException) when (context.Token.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogWarning(
+                exception,
+                "Could not read the PROTV details of series {ItemId}; its NFO is written or kept without genres and the next sync tries again.",
+                seriesId);
+            return null;
+        }
+    }
+
+    private static string MovieNfo(ProTvMovie movie, IReadOnlyList<ProTvVodCategory>? categories)
     {
         var root = new XElement("movie");
         root.Add(new XElement("title", DisplayTitle(movie.Title, movie.Id)));
@@ -1595,18 +2043,18 @@ internal static class ProTvVodLibrary
 
         AddRating(root, movie.ImdbScore > 0 ? movie.ImdbScore : movie.ProtvScore);
         AddText(root, "mpaa", FirstNonEmpty(movie.AudienceRatingString, movie.AudienceRating));
-        AddGenres(root, movie.Categories);
+        AddGenres(root, categories);
         return Nfo(root);
     }
 
-    private static string SeriesNfo(ProTvSeries series)
+    private static string SeriesNfo(ProTvSeries series, IReadOnlyList<ProTvVodCategory>? categories)
     {
         var root = new XElement("tvshow");
         root.Add(new XElement("title", DisplayTitle(series.Title, series.Id)));
         AddText(root, "plot", FirstNonEmpty(series.DescriptionEn, series.DescriptionAr));
         AddRating(root, series.ImdbScore);
         AddText(root, "mpaa", FirstNonEmpty(series.AudienceRatingString, series.AudienceRating));
-        AddGenres(root, series.Categories);
+        AddGenres(root, categories);
         return Nfo(root);
     }
 
@@ -1659,7 +2107,7 @@ internal static class ProTvVodLibrary
         }
     }
 
-    private static void AddGenres(XElement root, IReadOnlyList<ProTvVodCategory>? categories)
+    internal static void AddGenres(XElement root, IReadOnlyList<ProTvVodCategory>? categories)
     {
         if (categories is null)
         {
@@ -1710,6 +2158,10 @@ internal static class ProTvVodLibrary
             var loaded = JsonSerializer.Deserialize<ProTvVodSyncState>(File.ReadAllText(path, Encoding.UTF8));
             if (loaded is null)
             {
+                _logger?.LogWarning(
+                    "The PROTV VOD sync state at \"{Path}\" is empty; it is set aside and a fresh state is started.",
+                    path);
+                PreserveCorruptState(path);
                 return;
             }
 
@@ -1723,6 +2175,16 @@ internal static class ProTvVodLibrary
             State.NfoVersion = loaded.NfoVersion;
             State.LastSyncUtc = loaded.LastSyncUtc;
             State.LastError = loaded.LastError;
+            State.RunMovies = loaded.RunMovies;
+            State.RunSeries = loaded.RunSeries;
+            State.RunEpisodes = loaded.RunEpisodes;
+            State.SyncStartedUtc = loaded.SyncStartedUtc;
+            // A state file that still says "running" belongs to a process that stopped before it
+            // could write its final status; on this fresh start it is an interrupted (cancelled)
+            // run, not one that is still going.
+            State.LastRunStatus = string.Equals(loaded.LastRunStatus, "running", StringComparison.OrdinalIgnoreCase)
+                ? "cancelled"
+                : loaded.LastRunStatus ?? string.Empty;
             State.StreamBaseUrl = loaded.StreamBaseUrl;
             State.SubtitleCheckedIds = loaded.SubtitleCheckedIds ?? new HashSet<int>();
             State.StreamTokenVersion = loaded.StreamTokenVersion;
@@ -1730,9 +2192,56 @@ internal static class ProTvVodLibrary
                 .Where(pair => DateTime.UtcNow - pair.Value < PosterRetryAfter)
                 .ToDictionary(pair => pair.Key, pair => pair.Value);
         }
+        catch (JsonException exception)
+        {
+            _logger?.LogWarning(
+                exception,
+                "Could not read the PROTV VOD sync state; the corrupt file is set aside and a fresh state is started.");
+            PreserveCorruptState(path);
+        }
         catch (Exception exception)
         {
-            _logger?.LogDebug(exception, "Could not read the PROTV VOD sync state; starting from scratch.");
+            _logger?.LogWarning(exception, "Could not read the PROTV VOD sync state; starting from scratch.");
+        }
+    }
+
+    // Keeps the unreadable state instead of silently overwriting it: it is the only record of what
+    // the last run had downloaded, and an admin may want to look at it.
+    private static void PreserveCorruptState(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return;
+            }
+
+            var directory = Path.GetDirectoryName(path);
+            if (string.IsNullOrEmpty(directory))
+            {
+                return;
+            }
+
+            var stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+            var target = Path.Combine(directory, $"sync-state.corrupt-{stamp}.json");
+            var suffix = 1;
+            while (File.Exists(target))
+            {
+                target = Path.Combine(
+                    directory,
+                    $"sync-state.corrupt-{stamp}-{suffix.ToString(CultureInfo.InvariantCulture)}.json");
+                suffix++;
+            }
+
+            File.Move(path, target);
+            _logger?.LogWarning("The unreadable PROTV VOD sync state was kept as \"{Path}\".", target);
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogWarning(
+                exception,
+                "Could not set aside the unreadable PROTV VOD sync state at \"{Path}\".",
+                path);
         }
     }
 
@@ -1749,18 +2258,14 @@ internal static class ProTvVodLibrary
             // The item work in flight counts into the state, so it is written under the same lock.
             lock (StateGate)
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-
                 // Written to a temporary file first and moved into place, so a crash in the middle
                 // of a write cannot leave a half-written state file (which would reset the sync).
-                var temporary = path + ".tmp";
-                File.WriteAllText(temporary, JsonSerializer.Serialize(State), Utf8NoBom);
-                File.Move(temporary, path, overwrite: true);
+                WriteTextFileAtomically(path, JsonSerializer.Serialize(State));
             }
         }
         catch (Exception exception)
         {
-            _logger?.LogDebug(exception, "Could not save the PROTV VOD sync state.");
+            _logger?.LogWarning(exception, "Could not save the PROTV VOD sync state.");
         }
     }
 

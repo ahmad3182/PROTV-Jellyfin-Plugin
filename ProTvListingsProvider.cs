@@ -27,15 +27,15 @@ public sealed class ProTvListingsProvider : IListingsProvider
         var channels = await _api.GetEpgAsync(cancellationToken);
         var channel = channels.FirstOrDefault(item => item.ChannelId.ToString() == channelId);
         return (channel?.Programs ?? Array.Empty<ProTvEpgItem>())
-            .Where(program => program.EndTime > startDateUtc && program.StartTime < endDateUtc)
+            .Where(program => program.EndTimeUtc > startDateUtc && program.StartTimeUtc < endDateUtc)
             .Select(program => new ProgramInfo
             {
-                Id = $"PROTV-{channelId}-{program.StartTime:O}",
+                Id = $"PROTV-{channelId}-{program.StartTimeUtc:O}",
                 ChannelId = channelId,
                 Name = program.Title ?? "PROTV",
                 Overview = program.Description,
-                StartDate = program.StartTime.ToUniversalTime(),
-                EndDate = program.EndTime.ToUniversalTime(),
+                StartDate = program.StartTimeUtc,
+                EndDate = program.EndTimeUtc,
                 IsLive = true
             });
     }
@@ -63,7 +63,9 @@ public sealed class ProTvListingsProvider : IListingsProvider
             Number = (index + 1).ToString(),
             ImageUrl = ProTvChannelOrdering.LogoUrl(channel),
             HasImage = !string.IsNullOrWhiteSpace(ProTvChannelOrdering.LogoUrl(channel)),
-            ChannelType = ChannelType.TV
+            ChannelType = ChannelType.TV,
+            IsFavorite = ProTvChannelOrdering.IsFavorite(channel.Id),
+            ChannelGroup = ProTvChannelOrdering.GroupName(channel.Id)
         }).ToList();
     }
 }

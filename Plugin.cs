@@ -23,7 +23,40 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         : base(applicationPaths, xmlSerializer)
     {
         Instance = this;
+        ProTvSecretStore.Configure(applicationPaths);
         EnsureConfigurationFile();
+
+        // A password saved by an older build is plain text in PROTV.Plugin.xml. Rewriting the
+        // configuration now replaces it with the encrypted envelope while the value is still
+        // in memory, so the next Jellyfin restart reads the protected form.
+        if (Configuration.SecretsNeedMigration)
+        {
+            try
+            {
+                SaveConfiguration();
+            }
+            catch
+            {
+                // Never block start-up; the password keeps working and is retried next time.
+            }
+        }
+    }
+
+    // Refuse to write a secret in clear text. If <data>/protv/secret.key cannot be created or
+    // read, the dashboard shows a warning and the admin must fix the folder permissions first;
+    // the plugin must not silently downgrade the stored password/signing secret.
+    public override void SaveConfiguration()
+    {
+        var configuration = Configuration;
+        if (configuration is not null
+            && (ProTvSecretStore.NeedsProtection(configuration.Password)
+                || ProTvSecretStore.NeedsProtection(configuration.VodStreamSecret)))
+        {
+            throw new InvalidOperationException(
+                "PROTV could not encrypt its saved secrets. Check write access to the Jellyfin data folder and try again.");
+        }
+
+        base.SaveConfiguration();
     }
 
     // Lets other classes save the settings file without relying on SaveConfiguration's visibility.

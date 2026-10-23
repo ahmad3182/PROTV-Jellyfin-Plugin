@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -353,11 +354,37 @@ public sealed partial class ProTvApiClient
 
     public async Task<IReadOnlyList<ProTvEpgChannel>> GetEpgAsync(CancellationToken cancellationToken)
     {
-        var response = await SendAsync<ProTvResponse<IReadOnlyList<ProTvEpgChannel>>>(
+        // The live API answers with EPGDataResponseDto: channelTitleEn + epgItems, and each item
+        // has a local "showTime" plus a duration in minutes. The response also carries the server's
+        // local and UTC clock, which lets us convert its local programme times correctly even when
+        // Jellyfin runs in another time zone.
+        var response = await SendAsync<ProTvEpgResponse>(
             HttpMethod.Get,
             "api/Channels/EPGs",
             cancellationToken);
-        return response.Data ?? Array.Empty<ProTvEpgChannel>();
+        var channels = response.Data ?? Array.Empty<ProTvEpgChannel>();
+        var serverOffset = ServerOffset(response);
+        foreach (var channel in channels)
+        {
+            foreach (var program in channel.Programs ?? Array.Empty<ProTvEpgItem>())
+            {
+                program.ServerOffset = serverOffset;
+            }
+        }
+
+        return channels;
+    }
+
+    // serverTimeLocal carries the service's UTC offset; subtracting the two DateTimeOffsets
+    // directly would compare instants (both are the same instant) and produce zero.
+    internal static TimeSpan? ServerOffset(ProTvEpgResponse response)
+    {
+        if (response.ServerTimeLocal is not { } local || response.ServerTimeUtc is not { } utc)
+        {
+            return null;
+        }
+
+        return TimeSpan.FromMinutes(Math.Round((local.Offset - utc.Offset).TotalMinutes));
     }
 
     private Task<T> SendAsync<T>(HttpMethod method, string path, CancellationToken cancellationToken)
@@ -370,23 +397,99 @@ public sealed partial class ProTvApiClient
         string? acceptLanguage,
         CancellationToken cancellationToken)
     {
-        await EnsureAuthenticatedAsync(cancellationToken);
-        using var response = await SendAuthorizedAsync(method, path, addDeviceHeaders, acceptLanguage, cancellationToken);
-        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        const int maxAttempts = 3;
+        Exception? lastFailure = null;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            _accessToken = null;
-            _refreshToken = null;
-            _tokenCredentialKey = null;
-            await EnsureAuthenticatedAsync(cancellationToken);
-            using var retry = await SendAuthorizedAsync(method, path, addDeviceHeaders, acceptLanguage, cancellationToken);
-            retry.EnsureSuccessStatusCode();
-            return await retry.Content.ReadFromJsonAsync<T>(cancellationToken: cancellationToken)
-                ?? throw new InvalidOperationException("PROTV returned an empty response.");
+            try
+            {
+                await EnsureAuthenticatedAsync(cancellationToken);
+                using var response = await SendAuthorizedAsync(method, path, addDeviceHeaders, acceptLanguage, cancellationToken);
+                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                {
+                    // The saved token expired: authenticate once more and replay the request.
+                    _accessToken = null;
+                    _refreshToken = null;
+                    _tokenCredentialKey = null;
+                    await EnsureAuthenticatedAsync(cancellationToken);
+                    using var retry = await SendAuthorizedAsync(method, path, addDeviceHeaders, acceptLanguage, cancellationToken);
+                    retry.EnsureSuccessStatusCode();
+                    return await ReadAsync<T>(retry, cancellationToken);
+                }
+
+                if (IsTransient(response.StatusCode) && attempt < maxAttempts)
+                {
+                    lastFailure = new HttpRequestException($"PROTV answered {(int)response.StatusCode}.");
+                    await DelayBeforeRetryAsync(response, attempt, cancellationToken);
+                    continue;
+                }
+
+                response.EnsureSuccessStatusCode();
+                return await ReadAsync<T>(response, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (IsTransient(exception) && attempt < maxAttempts)
+            {
+                // Timeouts, connection resets and 5xx answers are retried with a short backoff;
+                // a caller cancelling the tab is never retried.
+                lastFailure = exception;
+                await DelayBeforeRetryAsync(null, attempt, cancellationToken);
+            }
         }
 
-        response.EnsureSuccessStatusCode();
+        throw lastFailure ?? new InvalidOperationException("PROTV did not answer the request.");
+    }
+
+    private static async Task<T> ReadAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
         return await response.Content.ReadFromJsonAsync<T>(cancellationToken: cancellationToken)
             ?? throw new InvalidOperationException("PROTV returned an empty response.");
+    }
+
+    private static bool IsTransient(System.Net.HttpStatusCode statusCode)
+        => statusCode is System.Net.HttpStatusCode.RequestTimeout
+            or System.Net.HttpStatusCode.TooManyRequests
+            or System.Net.HttpStatusCode.BadGateway
+            or System.Net.HttpStatusCode.ServiceUnavailable
+            or System.Net.HttpStatusCode.GatewayTimeout
+            || (int)statusCode >= 500;
+
+    private static bool IsTransient(Exception exception)
+        => exception is HttpRequestException
+            || exception is IOException
+            || exception is TaskCanceledException;
+
+    private static async Task DelayBeforeRetryAsync(
+        HttpResponseMessage? response,
+        int attempt,
+        CancellationToken cancellationToken)
+    {
+        var delay = TimeSpan.FromMilliseconds(300 * Math.Pow(2, attempt - 1));
+
+        var retryAfter = response?.Headers.RetryAfter;
+        if (retryAfter?.Delta is { } delta && delta > TimeSpan.Zero)
+        {
+            delay = delta;
+        }
+        else if (retryAfter?.Date is { } date)
+        {
+            var untilDate = date - DateTimeOffset.UtcNow;
+            if (untilDate > TimeSpan.Zero)
+            {
+                delay = untilDate;
+            }
+        }
+
+        if (delay > TimeSpan.FromSeconds(10))
+        {
+            delay = TimeSpan.FromSeconds(10);
+        }
+
+        await Task.Delay(delay, cancellationToken);
     }
 
     private Task<HttpResponseMessage> SendAuthorizedAsync(
@@ -395,27 +498,34 @@ public sealed partial class ProTvApiClient
         CancellationToken cancellationToken)
         => SendAuthorizedAsync(method, path, addDeviceHeaders: false, acceptLanguage: null, cancellationToken);
 
-    private Task<HttpResponseMessage> SendAuthorizedAsync(
+    private async Task<HttpResponseMessage> SendAuthorizedAsync(
         HttpMethod method,
         string path,
         bool addDeviceHeaders,
         string? acceptLanguage,
         CancellationToken cancellationToken)
     {
+        // Device detection includes a public-IP lookup and interface enumeration. It used to run
+        // synchronously on every request thread; now it is awaited off the request thread and
+        // shared by concurrent callers.
+        var device = addDeviceHeaders
+            ? await ProTvDeviceInfo.DetectAsync(Configuration, cancellationToken).ConfigureAwait(false)
+            : null;
+
         var request = new HttpRequestMessage(method, BuildUri(path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
-        if (addDeviceHeaders)
+        if (device is not null)
         {
             // The VOD endpoints are the ones the desktop app calls with its full device header set;
             // the live TV endpoints work without them, so only VOD asks for them.
-            AddDeviceHeaders(request, acceptLanguage ?? "en-US");
+            AddDeviceHeaders(request, device, acceptLanguage ?? "en-US");
         }
         else if (!string.IsNullOrWhiteSpace(acceptLanguage))
         {
             request.Headers.Add("Accept-Language", acceptLanguage);
         }
 
-        return SendAndDisposeRequestAsync(request, cancellationToken);
+        return await SendAndDisposeRequestAsync(request, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<HttpResponseMessage> SendAndDisposeRequestAsync(
@@ -434,7 +544,7 @@ public sealed partial class ProTvApiClient
 
     private static string BuildCredentialKey(PluginConfiguration configuration)
     {
-        return string.Join("\n", configuration.ApiBaseUrl?.Trim() ?? string.Empty, configuration.Username?.Trim() ?? string.Empty, configuration.Password ?? string.Empty);
+        return string.Join("\n", configuration.ApiBaseUrl?.Trim() ?? string.Empty, configuration.Username?.Trim() ?? string.Empty, configuration.PasswordValue);
     }
 
     private async Task EnsureAuthenticatedAsync(CancellationToken cancellationToken)
@@ -475,13 +585,13 @@ public sealed partial class ProTvApiClient
             }
 
             var username = configuration.Username?.Trim();
-            var password = configuration.Password;
+            var password = configuration.PasswordValue;
             if (string.IsNullOrWhiteSpace(username) || string.IsNullOrEmpty(password))
             {
                 throw new InvalidOperationException("PROTV username and password are not saved. Enter them in Dashboard > Plugins > PROTV and press Save.");
             }
 
-            var device = ProTvDeviceInfo.Detect(configuration);
+            var device = await ProTvDeviceInfo.DetectAsync(configuration, cancellationToken).ConfigureAwait(false);
             var payload = new ProTvLoginRequest(username, password, device.IpAddress);
             var json = JsonSerializer.Serialize(payload);
             _logger.LogInformation("PROTV logging in with the saved credentials (username and password are configured).");
@@ -489,7 +599,7 @@ public sealed partial class ProTvApiClient
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
             };
-            AddDeviceHeaders(request);
+            AddDeviceHeaders(request, device);
             using var response = await _httpClient.SendAsync(request, cancellationToken);
             response.EnsureSuccessStatusCode();
             var login = await response.Content.ReadFromJsonAsync<ProTvResponse<ProTvLoginData>>(cancellationToken: cancellationToken)
@@ -505,9 +615,10 @@ public sealed partial class ProTvApiClient
 
     private async Task RefreshAsync(CancellationToken cancellationToken)
     {
+        var device = await ProTvDeviceInfo.DetectAsync(Configuration, cancellationToken).ConfigureAwait(false);
         using var request = new HttpRequestMessage(HttpMethod.Post, BuildUri("api/Account/RefreshToken"));
         request.Headers.Add("refresh-token", _refreshToken);
-        AddDeviceHeaders(request);
+        AddDeviceHeaders(request, device);
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         var login = await response.Content.ReadFromJsonAsync<ProTvResponse<ProTvLoginData>>(cancellationToken: cancellationToken)
@@ -537,9 +648,8 @@ public sealed partial class ProTvApiClient
             : token.Trim();
     }
 
-    private void AddDeviceHeaders(HttpRequestMessage request, string acceptLanguage = "en-US")
+    private void AddDeviceHeaders(HttpRequestMessage request, ProTvDeviceInfo device, string acceptLanguage = "en-US")
     {
-        var device = ProTvDeviceInfo.Detect(Configuration);
         request.Headers.Add("Accept-Language", acceptLanguage);
         request.Headers.Add("device-type", "Desktop");
         request.Headers.Add("device-os", "Windows10");
@@ -566,22 +676,23 @@ public sealed partial class ProTvApiClient
 internal sealed record ProTvDeviceInfo(string IpAddress, string MacAddress, string RouterMacAddress, string Model)
 {
     private static readonly object DeviceCacheLock = new();
+    private static readonly object DeviceTaskLock = new();
     private static string? _deviceCacheKey;
     private static ProTvDeviceInfo? _deviceCache;
     private static DateTime _deviceCacheUtc = DateTime.MinValue;
+    private static Task<ProTvDeviceInfo>? _deviceTask;
+    private static string? _deviceTaskKey;
     private static readonly TimeSpan DeviceCacheLifetime = TimeSpan.FromMinutes(5);
+    private static readonly HttpClient PublicIpClient = new() { Timeout = TimeSpan.FromSeconds(3) };
 
-    // Detect runs for every API request (headers); cache the result so playback start does not
-    // repeat interface enumeration, gateway lookup and ARP reads.
-    public static ProTvDeviceInfo Detect(PluginConfiguration configuration)
+    // Device detection runs for VOD API requests (headers); cache the result so playback start
+    // does not repeat interface enumeration, gateway lookup and ARP reads. It is async and
+    // single-flight so a slow public-IP lookup cannot block an ASP.NET request thread.
+    public static async Task<ProTvDeviceInfo> DetectAsync(
+        PluginConfiguration configuration,
+        CancellationToken cancellationToken)
     {
-        var key = string.Join(
-            "|",
-            configuration.ApiBaseUrl,
-            configuration.DeviceIpAddress,
-            configuration.DeviceMacAddress,
-            configuration.RouterMacAddress,
-            configuration.DeviceModel);
+        var key = DeviceCacheKey(configuration);
         lock (DeviceCacheLock)
         {
             if (_deviceCache is not null
@@ -592,7 +703,19 @@ internal sealed record ProTvDeviceInfo(string IpAddress, string MacAddress, stri
             }
         }
 
-        var detected = DetectUncached(configuration);
+        Task<ProTvDeviceInfo> task;
+        lock (DeviceTaskLock)
+        {
+            if (_deviceTask is null || !string.Equals(_deviceTaskKey, key, StringComparison.Ordinal))
+            {
+                _deviceTaskKey = key;
+                _deviceTask = Task.Run(() => DetectUncached(configuration), CancellationToken.None);
+            }
+
+            task = _deviceTask;
+        }
+
+        var detected = await task.WaitAsync(cancellationToken).ConfigureAwait(false);
         lock (DeviceCacheLock)
         {
             _deviceCacheKey = key;
@@ -600,23 +723,55 @@ internal sealed record ProTvDeviceInfo(string IpAddress, string MacAddress, stri
             _deviceCacheUtc = DateTime.UtcNow;
         }
 
+        // Do not memoise a completed detection task forever: the five-minute cache expiry must
+        // actually re-enumerate interfaces and the gateway after a DHCP/NIC change.
+        lock (DeviceTaskLock)
+        {
+            if (ReferenceEquals(_deviceTask, task))
+            {
+                _deviceTask = null;
+                _deviceTaskKey = null;
+            }
+        }
+
         return detected;
     }
 
+    private static string DeviceCacheKey(PluginConfiguration configuration)
+        => string.Join(
+            "|",
+            configuration.ApiBaseUrl,
+            configuration.DeviceIpAddress,
+            configuration.DeviceMacAddress,
+            configuration.RouterMacAddress,
+            configuration.DeviceModel);
+
     private static ProTvDeviceInfo DetectUncached(PluginConfiguration configuration)
     {
-        var ipAddress = DetectIpAddress(configuration.ApiBaseUrl, configuration.DeviceIpAddress);
-        var macAddress = DetectMacAddress(configuration.DeviceMacAddress);
-        var gateway = DetectGateway();
-        var routerMacAddress = string.IsNullOrWhiteSpace(configuration.RouterMacAddress)
-            ? DetectGatewayMac(gateway)
-            : configuration.RouterMacAddress;
-        var model = string.IsNullOrWhiteSpace(configuration.DeviceModel)
-            || configuration.DeviceModel.Equals("Jellyfin Server", StringComparison.OrdinalIgnoreCase)
-            ? Environment.MachineName
-            : configuration.DeviceModel;
+        try
+        {
+            var ipAddress = DetectIpAddress(configuration.ApiBaseUrl, configuration.DeviceIpAddress);
+            var macAddress = DetectMacAddress(configuration.DeviceMacAddress);
+            var gateway = DetectGateway();
+            var routerMacAddress = string.IsNullOrWhiteSpace(configuration.RouterMacAddress)
+                ? DetectGatewayMac(gateway)
+                : configuration.RouterMacAddress;
+            var model = string.IsNullOrWhiteSpace(configuration.DeviceModel)
+                || configuration.DeviceModel.Equals("Jellyfin Server", StringComparison.OrdinalIgnoreCase)
+                ? Environment.MachineName
+                : configuration.DeviceModel;
 
-        return new ProTvDeviceInfo(ipAddress, macAddress, routerMacAddress, model);
+            return new ProTvDeviceInfo(ipAddress, macAddress, routerMacAddress, model);
+        }
+        catch
+        {
+            // A probe failure must not stop login or VOD browsing. Send the configured values.
+            return new ProTvDeviceInfo(
+                configuration.DeviceIpAddress ?? string.Empty,
+                configuration.DeviceMacAddress ?? string.Empty,
+                configuration.RouterMacAddress ?? string.Empty,
+                string.IsNullOrWhiteSpace(configuration.DeviceModel) ? Environment.MachineName : configuration.DeviceModel);
+        }
     }
 
     private static readonly object IpCacheLock = new();
@@ -654,8 +809,7 @@ internal sealed record ProTvDeviceInfo(string IpAddress, string MacAddress, stri
     {
         try
         {
-            using var publicIpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-            var publicIp = publicIpClient.GetStringAsync("https://api.ipify.org").GetAwaiter().GetResult().Trim();
+            var publicIp = PublicIpClient.GetStringAsync("https://api.ipify.org").GetAwaiter().GetResult().Trim();
             if (IPAddress.TryParse(publicIp, out var parsedPublicIp) && parsedPublicIp.AddressFamily == AddressFamily.InterNetwork)
             {
                 return parsedPublicIp.ToString();
@@ -814,17 +968,114 @@ public sealed class ProTvChannel
     public string? WebURL { get; set; }
 }
 
+public sealed class ProTvEpgResponse : ProTvResponse<IReadOnlyList<ProTvEpgChannel>>
+{
+    [JsonPropertyName("serverTimeLocal")]
+    public DateTimeOffset? ServerTimeLocal { get; set; }
+
+    [JsonPropertyName("serverTimeUTC")]
+    public DateTimeOffset? ServerTimeUtc { get; set; }
+}
+
 public sealed class ProTvEpgChannel
 {
+    [JsonPropertyName("channelId")]
     public int ChannelId { get; set; }
+
+    [JsonPropertyName("channelTitleEn")]
     public string? ChannelName { get; set; }
+
+    [JsonPropertyName("channelTitleAr")]
+    public string? ChannelNameAr { get; set; }
+
+    // PROTV calls this array "epgItems"; keep the older property name for the callers.
+    [JsonPropertyName("epgItems")]
     public IReadOnlyList<ProTvEpgItem>? Programs { get; set; }
 }
 
 public sealed class ProTvEpgItem
 {
+    [JsonPropertyName("title")]
     public string? Title { get; set; }
+
+    [JsonPropertyName("description")]
     public string? Description { get; set; }
-    public DateTime StartTime { get; set; }
-    public DateTime EndTime { get; set; }
+
+    [JsonPropertyName("showTime")]
+    public DateTime? ShowTime { get; set; }
+
+    [JsonPropertyName("day")]
+    public DateTime? Day { get; set; }
+
+    // "00:30:00" on the wire; kept as text because System.Text.Json cannot bind a time-only
+    // string to DateTime.
+    [JsonPropertyName("startTime")]
+    public string? StartTimeText { get; set; }
+
+    // Minutes on the wire ("120"), or a time span in some service versions.
+    [JsonPropertyName("duration")]
+    public string? Duration { get; set; }
+
+    // Set by GetEpgAsync from serverTimeLocal - serverTimeUTC so programme times are converted
+    // correctly even when the Jellyfin host uses a different time zone.
+    [JsonIgnore]
+    public TimeSpan? ServerOffset { get; set; }
+
+    [JsonIgnore]
+    public DateTime StartTimeUtc
+    {
+        get
+        {
+            var local = LocalStartTime();
+            if (local == DateTime.MinValue)
+            {
+                return DateTime.MinValue;
+            }
+
+            var offset = ServerOffset ?? TimeZoneInfo.Local.GetUtcOffset(local);
+            return new DateTimeOffset(local, offset).UtcDateTime;
+        }
+    }
+
+    [JsonIgnore]
+    public DateTime EndTimeUtc
+    {
+        get
+        {
+            var start = StartTimeUtc;
+            return start == DateTime.MinValue ? DateTime.MinValue : start.AddMinutes(DurationMinutes());
+        }
+    }
+
+    private DateTime LocalStartTime()
+    {
+        if (ShowTime is { } showTime)
+        {
+            return DateTime.SpecifyKind(showTime, DateTimeKind.Unspecified);
+        }
+
+        if (Day is { } day
+            && TimeSpan.TryParse(StartTimeText, CultureInfo.InvariantCulture, out var start))
+        {
+            return DateTime.SpecifyKind(day.Date + start, DateTimeKind.Unspecified);
+        }
+
+        return DateTime.MinValue;
+    }
+
+    private int DurationMinutes()
+    {
+        if (int.TryParse(Duration, NumberStyles.Integer, CultureInfo.InvariantCulture, out var minutes)
+            && minutes > 0)
+        {
+            return minutes;
+        }
+
+        if (TimeSpan.TryParse(Duration, CultureInfo.InvariantCulture, out var span) && span > TimeSpan.Zero)
+        {
+            return Math.Max(1, (int)Math.Ceiling(span.TotalMinutes));
+        }
+
+        return 30;
+    }
 }

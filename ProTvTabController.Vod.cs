@@ -80,11 +80,11 @@ public sealed partial class ProTvTabController
         => Ok(await ProTvVodData.GetCategoriesAsync(series, cancellationToken));
 
     [HttpGet("Vod/Status")]
-    [Authorize]
+    [Authorize(Policy = "RequiresElevation")]
     public ActionResult<ProTvVodStatus> GetVodStatus() => ProTvVodData.GetStatus(ProTvVodLibrary.IsRunning);
 
     [HttpPost("Vod/Sync")]
-    [Authorize]
+    [Authorize(Policy = "RequiresElevation")]
     public ActionResult<ProTvVodStatus> StartVodSync()
     {
         var taskManager = HttpContext.RequestServices.GetService<ITaskManager>();

@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "D:\\PROTV Plugin Project\\PROTV Plugin 0.7\\PROTV.Plugin.csproj": {}
+    "C:\\Users\\ahmad\\Documents\\Default Project\\PROTV Plugin 0.8\\PROTV.Plugin.csproj": {}
   },
   "projects": {
-    "D:\\PROTV Plugin Project\\PROTV Plugin 0.7\\PROTV.Plugin.csproj": {
-      "version": "1.0.0",
+    "C:\\Users\\ahmad\\Documents\\Default Project\\PROTV Plugin 0.8\\PROTV.Plugin.csproj": {
+      "version": "0.8.0",
       "restore": {
-        "projectUniqueName": "D:\\PROTV Plugin Project\\PROTV Plugin 0.7\\PROTV.Plugin.csproj",
+        "projectUniqueName": "C:\\Users\\ahmad\\Documents\\Default Project\\PROTV Plugin 0.8\\PROTV.Plugin.csproj",
         "projectName": "PROTV.Plugin",
-        "projectPath": "D:\\PROTV Plugin Project\\PROTV Plugin 0.7\\PROTV.Plugin.csproj",
+        "projectPath": "C:\\Users\\ahmad\\Documents\\Default Project\\PROTV Plugin 0.8\\PROTV.Plugin.csproj",
         "packagesPath": "C:\\Users\\ahmad\\.nuget\\packages\\",
-        "outputPath": "D:\\PROTV Plugin Project\\PROTV Plugin 0.7\\obj\\",
+        "outputPath": "C:\\Users\\ahmad\\Documents\\Default Project\\PROTV Plugin 0.8\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

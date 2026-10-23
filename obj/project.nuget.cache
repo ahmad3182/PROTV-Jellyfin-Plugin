@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "41L6fCmASLI=",
+  "dgSpecHash": "VPA5skiVvlA=",
   "success": true,
-  "projectFilePath": "D:\\PROTV Plugin Project\\PROTV Plugin 0.7\\PROTV.Plugin.csproj",
+  "projectFilePath": "C:\\Users\\ahmad\\Documents\\Default Project\\PROTV Plugin 0.8\\PROTV.Plugin.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\ahmad\\.nuget\\packages\\diacritics\\4.1.8\\diacritics.4.1.8.nupkg.sha512",
     "C:\\Users\\ahmad\\.nuget\\packages\\icu4n\\60.1.0-alpha.356\\icu4n.60.1.0-alpha.356.nupkg.sha512",
