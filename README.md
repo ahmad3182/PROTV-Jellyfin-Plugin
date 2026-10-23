@@ -8,7 +8,7 @@ dashboard, search, parental locks and a PROTV tab on the Jellyfin home page.
 > configuration (see [What the plugin modifies](#what-the-plugin-modifies)) and can misbehave.
 > **Back up your Jellyfin configuration and data before installing it.** Use it at your own risk.
 >
-> **Made with AI.** This plugin was developed with the help of AI (Claude, by Anthropic). AI-written
+> **Made with AI.** This plugin was developed with the help of AI (Claude,Deepseek,Chatgpt). AI-written
 > code can contain mistakes, and it has only had limited testing on real servers.
 
 ![PROTV dashboard](docs/images/dashboard.png)
