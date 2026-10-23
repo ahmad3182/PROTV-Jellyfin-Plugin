@@ -51,7 +51,7 @@ Live TV without the sidebar entry and home page tab.
 ### From the plugin catalog
 
 1. **Dashboard > Plugins > Repositories > Add** and enter:
-   `https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/YOUR_REPO/main/manifest.json`
+   `https://raw.githubusercontent.com/ahmad3182/PROTV-Jellyfin-Plugin/Stable/manifest.json`
 2. Open the **Catalog**, install **PROTV**, and restart Jellyfin.
 
 ### By hand
